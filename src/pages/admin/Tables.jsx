@@ -19,6 +19,7 @@ function getTableSize(table) {
 
 function getTableColor(table, assignedReservations) {
   if (!table.is_bookable) return '#9ca3af'
+  if (table.locked_until && new Date(table.locked_until) > new Date()) return '#7c3aed'
   if (table.table_number === 'Big Table') {
     if (assignedReservations.some(r => r.status === 'seated')) return '#16a34a'
     if (assignedReservations.length > 0) return '#ca8a04'
@@ -190,6 +191,11 @@ export default function Tables() {
     )
   }
 
+  function isTableLocked(table) {
+    if (!table.locked_until) return false
+    return new Date(table.locked_until) > new Date()
+  }
+
   async function assignTable(tableId, reservationId) {
     const reservation = reservations.find(r => r.id === reservationId)
     const tableReservations = getTableReservations(tableId)
@@ -211,6 +217,13 @@ export default function Tables() {
     const currentIds = Array.isArray(reservation.table_ids) ? reservation.table_ids : []
     const newIds = currentIds.includes(tableId) ? currentIds : [...currentIds, tableId]
     await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
+    const [h, m] = reservation.reservation_time.split(':').map(Number)
+    const lockFrom = new Date()
+    lockFrom.setHours(h, m, 0, 0)
+    const lockUntil = new Date(lockFrom.getTime() + 2 * 60 * 60 * 1000)
+    await supabase.from('restaurant_tables')
+      .update({ locked_until: lockUntil.toISOString(), locked_by_reservation: reservationId })
+      .eq('id', tableId)
     await fetchAll()
     setSelected(null)
   }
@@ -219,6 +232,9 @@ export default function Tables() {
     const reservation = reservations.find(r => r.id === reservationId)
     const newIds = (Array.isArray(reservation.table_ids) ? reservation.table_ids : []).filter(id => id !== tableId)
     await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
+    await supabase.from('restaurant_tables')
+      .update({ locked_until: null, locked_by_reservation: null })
+      .eq('id', tableId)
     await fetchAll()
   }
 
@@ -470,6 +486,7 @@ export default function Tables() {
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-yellow-600 inline-block"></span> Reserved</span>
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-green-600 inline-block"></span> Seated</span>
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-gray-400 inline-block"></span> Blocked</span>
+                  <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-purple-700 inline-block"></span> Locked</span>
                   <span className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded inline-block" style={{ backgroundColor: '#1B3A6B' }}></span>
                     Big Table
@@ -500,8 +517,19 @@ export default function Tables() {
                           <p className="font-semibold text-sm">{r.customers?.full_name}</p>
                           <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
                         </div>
-                        <button onClick={() => unassignTable(selectedTable.id, r.id)}
-                          className="text-red-500 text-xs hover:text-red-700">Unassign</button>
+                        <div className="flex gap-3">
+                          <button onClick={() => unassignTable(selectedTable.id, r.id)}
+                            className="text-red-500 text-xs hover:text-red-700">Unassign</button>
+                          {selectedTable.locked_until && new Date(selectedTable.locked_until) > new Date() && (
+                            <button onClick={async () => {
+                              await supabase.from('restaurant_tables')
+                                .update({ locked_until: null, locked_by_reservation: null })
+                                .eq('id', selectedTable.id)
+                              await fetchAll()
+                            }}
+                              className="text-purple-600 text-xs hover:text-purple-800">Release Lock</button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}

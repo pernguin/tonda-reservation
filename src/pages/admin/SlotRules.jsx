@@ -60,8 +60,8 @@ export default function SlotRules() {
         day_type: def.day_type, label: def.label,
         rule_type: slot?.rule_type || def.rule_type,
         closed_days: hours?.closed_days || def.closed_days,
-        sessions: hours?.sessions?.length > 0 ? hours.sessions
-          : slot?.sessions?.length > 0 ? slot.sessions
+        sessions: slot?.sessions?.length > 0 ? slot.sessions
+          : hours?.sessions?.length > 0 ? hours.sessions
           : def.sessions
       }
     })

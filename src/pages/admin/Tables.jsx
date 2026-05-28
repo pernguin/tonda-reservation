@@ -209,6 +209,22 @@ export default function Tables() {
     const reservation = reservations.find(r => r.id === reservationId)
     const tableReservations = getTableReservations(tableId)
     const conflict = checkTimeConflict(tableReservations, reservation)
+    const table = tables.find(t => t.id === tableId)
+
+    // Check capacity
+    const alreadyAssigned = getAssignedCapacity(reservationId)
+    const tableCapacity = table?.capacity || 0
+    const totalAfterAssign = alreadyAssigned + tableCapacity
+    const guestCount = reservation.guest_count
+
+    if (conflict.conflict && totalAfterAssign < guestCount) {
+      setConfirmModal({
+        message: `This table already has a reservation within 2 hours of ${reservation.reservation_time} AND combined capacity (${totalAfterAssign}) is still below guest count (${guestCount}). Assign anyway?`,
+        onConfirm: () => { doAssign(tableId, reservationId); setConfirmModal(null) },
+        onCancel: () => setConfirmModal(null)
+      })
+      return
+    }
 
     if (conflict.conflict) {
       setConfirmModal({
@@ -218,6 +234,16 @@ export default function Tables() {
       })
       return
     }
+
+    if (totalAfterAssign < guestCount) {
+      setConfirmModal({
+        message: `After assigning this table, combined capacity will be ${totalAfterAssign} seats but the reservation is for ${guestCount} guests. You may need to assign more tables. Assign anyway?`,
+        onConfirm: () => { doAssign(tableId, reservationId); setConfirmModal(null) },
+        onCancel: () => setConfirmModal(null)
+      })
+      return
+    }
+
     doAssign(tableId, reservationId)
   }
 

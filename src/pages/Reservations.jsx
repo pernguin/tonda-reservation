@@ -157,6 +157,7 @@ export default function Reservations() {
   const [dateError, setDateError] = useState(null)
   const [submitted, setSubmitted] = useState(false)
   const [bookingId, setBookingId] = useState(null)
+  const [confirmationMessage, setConfirmationMessage] = useState('Thank you for your reservation request. Our team will contact you shortly to confirm your booking.')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -236,6 +237,8 @@ export default function Reservations() {
         .single()
       if (bookingError) throw bookingError
       setBookingId(booking.id)
+      const { data: msgData } = await supabase.from('settings').select('value').eq('key', 'confirmation_message_reservation').maybeSingle()
+      if (msgData?.value) setConfirmationMessage(msgData.value)
       setSubmitted(true)
     } catch (err) {
       setError('Something went wrong. Please try again.')
@@ -272,9 +275,7 @@ function CopyButton({ text }) {
             </svg>
           </div>
           <h2 className="text-2xl font-light mb-3" style={{ color: BRAND }}>Request Received</h2>
-          <p className="text-gray-500 text-sm leading-relaxed mb-6">
-            Thank you for your reservation request. Our team will contact you shortly to confirm your booking.
-          </p>
+          <p className="text-gray-500 text-sm leading-relaxed mb-6">{confirmationMessage}</p>
           <div className="border border-gray-200 rounded-xl p-4 mb-8 text-left"
             style={{ backgroundColor: 'white' }}>
             <p className="text-xs tracking-widest uppercase text-gray-400 mb-2">Manage your booking</p>

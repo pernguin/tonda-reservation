@@ -12,6 +12,7 @@ export default function AdminNav() {
           { to: '/admin/tables', label: 'Floor Plan' },
           { to: '/admin/slot-rules', label: 'Slot Rules' },
           { to: '/admin/customers', label: 'Customers' },
+          { to: '/admin/settings', label: 'Settings' },
         ].map(({ to, label }) => (
           <NavLink
             key={to}

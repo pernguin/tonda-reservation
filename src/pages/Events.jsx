@@ -24,6 +24,7 @@ export default function Events() {
     best_time_to_reach: ''
   })
   const [submitted, setSubmitted] = useState(false)
+  const [confirmationMessage, setConfirmationMessage] = useState('Thank you for your event enquiry. Our team will be in touch shortly to discuss your event.')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -63,6 +64,8 @@ export default function Events() {
         }])
 
       if (eventError) throw eventError
+      const { data: msgData } = await supabase.from('settings').select('value').eq('key', 'confirmation_message_event').maybeSingle()
+      if (msgData?.value) setConfirmationMessage(msgData.value)
       setSubmitted(true)
     } catch (err) {
       setError('Something went wrong. Please try again.')
@@ -84,9 +87,7 @@ export default function Events() {
             </svg>
           </div>
           <h2 className="text-2xl font-light mb-3" style={{ color: BRAND }}>Enquiry Received</h2>
-          <p className="text-gray-500 text-sm leading-relaxed mb-8">
-            Thank you for your event enquiry. Our team will be in touch shortly to discuss your event.
-          </p>
+          <p className="text-gray-500 text-sm leading-relaxed mb-8">{confirmationMessage}</p>
           <a href="/"
             className="text-xs tracking-widest uppercase transition-colors"
             style={{ color: BRAND }}>

@@ -14,6 +14,7 @@ import Customers from './pages/admin/Customers'
 import Login from './pages/admin/Login'
 import RequireAuth from './components/RequireAuth'
 import AdminNav from './components/AdminNav'
+import Settings from './pages/admin/Settings'
 
 function Layout() {
   const location = useLocation()
@@ -35,6 +36,7 @@ function Layout() {
         <Route path="/admin/bookings" element={<RequireAuth><Bookings /></RequireAuth>} />
         <Route path="/admin/slot-rules" element={<RequireAuth><SlotRules /></RequireAuth>} />
         <Route path="/admin/customers" element={<RequireAuth><Customers /></RequireAuth>} />
+        <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
       </Routes>
       {!isHome && <Footer />}
     </>

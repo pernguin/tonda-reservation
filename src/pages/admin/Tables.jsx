@@ -143,6 +143,8 @@ export default function Tables() {
   const [saved, setSaved] = useState(false)
   const [mode, setMode] = useState('assign')
   const [confirmModal, setConfirmModal] = useState(null)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [multiSelected, setMultiSelected] = useState([])
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
@@ -273,6 +275,44 @@ export default function Tables() {
     await fetchAll()
   }
 
+  async function mergeTables() {
+    if (multiSelected.length < 2) return
+    const selectedTableObjects = tables.filter(t => multiSelected.includes(t.id))
+    const combinedCapacity = selectedTableObjects.reduce((sum, t) => sum + (t.capacity || 0), 0)
+    const { data: group, error } = await supabase
+      .from('table_groups')
+      .insert({ table_ids: multiSelected, combined_capacity: combinedCapacity })
+      .select()
+      .single()
+    if (error) { console.error(error); return }
+    await supabase
+      .from('restaurant_tables')
+      .update({ group_id: group.id })
+      .in('id', multiSelected)
+    setMultiSelected([])
+    setMultiSelectMode(false)
+    await fetchAll()
+  }
+
+  async function unmergeTables(groupId) {
+    const groupTableIds = tables
+      .filter(t => t.group_id === groupId)
+      .map(t => t.id)
+    const affectedReservations = reservations.filter(r =>
+      Array.isArray(r.table_ids) &&
+      r.table_ids.some(tid => groupTableIds.includes(tid))
+    )
+    for (const r of affectedReservations) {
+      const newTableIds = r.table_ids.filter(tid => !groupTableIds.includes(tid))
+      await supabase.from('reservations').update({ table_ids: newTableIds }).eq('id', r.id)
+    }
+    await supabase.from('restaurant_tables')
+      .update({ group_id: null, locked_until: null, locked_by_reservation: null })
+      .eq('group_id', groupId)
+    await supabase.from('table_groups').delete().eq('id', groupId)
+    await fetchAll()
+  }
+
   function getSVGPoint(clientX, clientY) {
     const pt = svgRef.current.createSVGPoint()
     pt.x = clientX
@@ -335,6 +375,14 @@ export default function Tables() {
   }
 
   function onTableClick(table) {
+    if (multiSelectMode) {
+      setMultiSelected(prev =>
+        prev.includes(table.id)
+          ? prev.filter(id => id !== table.id)
+          : [...prev, table.id]
+      )
+      return
+    }
     setSelected(selected === table.id ? null : table.id)
   }
 
@@ -354,7 +402,7 @@ export default function Tables() {
           </p>
         </div>
         <div className="flex gap-2 md:gap-3">
-          <button onClick={() => { setMode(mode === 'assign' ? 'layout' : 'assign'); setSelected(null) }}
+          <button onClick={() => { setMode(mode === 'assign' ? 'layout' : 'assign'); setSelected(null); setMultiSelectMode(false); setMultiSelected([]) }}
             className="px-3 md:px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700">
             {mode === 'assign' ? '✏️ Edit Layout' : '← Back'}
           </button>
@@ -398,6 +446,7 @@ export default function Tables() {
               const color = getTableColor(table, assigned)
               const label = getTableLabel(table, assigned)
               const isSelected = selected === table.id
+              const isMultiSelected = multiSelected.includes(table.id)
 
               const isBarStool = table.table_number?.startsWith('B') && table.table_number !== 'BT'
 
@@ -415,7 +464,7 @@ export default function Tables() {
                         cy={table.y_position + h / 2}
                         r={w / 2}
                         fill={color}
-                        stroke={isSelected ? '#3b82f6' : 'transparent'}
+                        stroke={isMultiSelected ? '#f59e0b' : isSelected ? '#3b82f6' : 'transparent'}
                         strokeWidth="2"
                         opacity="0.9"
                       />
@@ -433,7 +482,7 @@ export default function Tables() {
                         x={table.x_position} y={table.y_position}
                         width={w} height={h} rx="2"
                         fill={color}
-                        stroke={isSelected ? '#3b82f6' : 'transparent'}
+                        stroke={isMultiSelected ? '#f59e0b' : isSelected ? '#3b82f6' : 'transparent'}
                         strokeWidth="2"
                         opacity="0.9"
                       />
@@ -463,10 +512,44 @@ export default function Tables() {
 
         <div className="w-full md:w-[45%] border border-gray-200 rounded-xl p-4 md:p-5 overflow-y-auto max-h-[500px] md:max-h-[600px]">
 
-          {mode === 'layout' && !selectedTable && (
-            <div className="text-gray-400 text-sm text-center mt-8">
-              <p>Drag tables to reposition.</p>
-              <p className="mt-1">Click a table to edit it.</p>
+          {mode === 'layout' && !selectedTable && !multiSelectMode && (
+            <div className="space-y-4 mt-4">
+              <button
+                onClick={() => { setMultiSelectMode(true); setMultiSelected([]) }}
+                className="w-full py-2 text-xs font-medium tracking-widest uppercase border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
+                Select Multiple to Merge
+              </button>
+              <div className="text-gray-400 text-sm text-center mt-4">
+                <p>Drag tables to reposition.</p>
+                <p className="mt-1">Click a table to edit it.</p>
+              </div>
+            </div>
+          )}
+
+          {mode === 'layout' && multiSelectMode && (
+            <div className="space-y-3 mt-4">
+              <div className="flex justify-between items-center">
+                <p className="text-sm font-medium text-gray-700">
+                  {multiSelected.length} table{multiSelected.length !== 1 ? 's' : ''} selected
+                </p>
+                <button
+                  onClick={() => { setMultiSelectMode(false); setMultiSelected([]) }}
+                  className="text-xs text-gray-400 hover:text-gray-700">
+                  Cancel
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">Tap tables on the floor plan to select them.</p>
+              {multiSelected.length >= 2 && (
+                <button
+                  onClick={mergeTables}
+                  className="w-full py-2.5 text-xs font-medium tracking-widest uppercase text-white rounded-lg transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: '#E8420A' }}>
+                  Merge {multiSelected.length} Tables
+                </button>
+              )}
+              {multiSelected.length > 0 && multiSelected.length < 2 && (
+                <p className="text-xs text-gray-400 text-center">Select at least 2 tables to merge</p>
+              )}
             </div>
           )}
 
@@ -476,6 +559,16 @@ export default function Tables() {
                 <h3 className="font-bold text-base">{selectedTable.table_number}</h3>
                 <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-black text-sm">✕</button>
               </div>
+              {selectedTable.group_id && (
+                <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                  <p className="text-xs text-amber-700 mb-2">This table is part of a merged group.</p>
+                  <button
+                    onClick={() => { unmergeTables(selectedTable.group_id); setSelected(null) }}
+                    className="w-full py-2 text-xs font-medium tracking-widest uppercase border border-amber-400 text-amber-700 hover:bg-amber-100 rounded-lg transition-colors">
+                    Unmerge Tables
+                  </button>
+                </div>
+              )}
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Table Name</p>
               <input type="text" value={selectedTable.table_number}
                 onChange={e => setTables(prev => prev.map(t => t.id === selected ? { ...t, table_number: e.target.value } : t))}

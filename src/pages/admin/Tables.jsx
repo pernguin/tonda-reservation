@@ -196,6 +196,15 @@ export default function Tables() {
     return new Date(table.locked_until) > new Date()
   }
 
+  function getAssignedCapacity(reservationId) {
+    const reservation = reservations.find(r => r.id === reservationId)
+    if (!reservation || !Array.isArray(reservation.table_ids)) return 0
+    return reservation.table_ids.reduce((total, tableId) => {
+      const table = tables.find(t => t.id === tableId)
+      return total + (table?.capacity || 0)
+    }, 0)
+  }
+
   async function assignTable(tableId, reservationId) {
     const reservation = reservations.find(r => r.id === reservationId)
     const tableReservations = getTableReservations(tableId)
@@ -476,6 +485,7 @@ export default function Tables() {
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
                       {r.status}
                     </span>
+                    <p className="text-xs mt-0.5 text-gray-400">{r.guest_count} seats needed</p>
                   </div>
                 ))
               )}
@@ -516,6 +526,13 @@ export default function Tables() {
                         <div>
                           <p className="font-semibold text-sm">{r.customers?.full_name}</p>
                           <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
+                          {(() => {
+                            const assigned = getAssignedCapacity(r.id)
+                            const needed = r.guest_count - assigned
+                            if (needed <= 0) return <p className="text-xs font-medium mt-0.5" style={{ color: '#16a34a' }}>✓ Fully seated ({assigned} seats assigned)</p>
+                            if (assigned > 0) return <p className="text-xs font-medium mt-0.5" style={{ color: '#ca8a04' }}>⚠ {needed} more seat{needed > 1 ? 's' : ''} needed</p>
+                            return <p className="text-xs font-medium mt-0.5" style={{ color: '#dc2626' }}>✗ No seats assigned yet</p>
+                          })()}
                         </div>
                         <div className="flex gap-3">
                           <button onClick={() => unassignTable(selectedTable.id, r.id)}
@@ -549,6 +566,13 @@ export default function Tables() {
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
                       {r.status}
                     </span>
+                    {(() => {
+                      const assigned = getAssignedCapacity(r.id)
+                      const needed = r.guest_count - assigned
+                      if (needed <= 0) return <p className="text-xs mt-0.5" style={{ color: '#16a34a' }}>✓ Fully seated</p>
+                      if (assigned > 0) return <p className="text-xs mt-0.5" style={{ color: '#ca8a04' }}>+{needed} seats still needed</p>
+                      return <p className="text-xs mt-0.5 text-gray-400">{r.guest_count} seats needed</p>
+                    })()}
                   </div>
                 ))
               )}

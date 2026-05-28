@@ -8,10 +8,10 @@ const FLOOR_POINTS = [
 const ENTRANCE = { x: 370, y: 60 }
 
 function getTableSize(table) {
-  if (table.table_number === 'Big Table') {
+  if (table.table_number === 'BT') {
     return table.rotated ? { w: 18, h: 32 } : { w: 32, h: 18 }
   }
-  if (table.table_number?.startsWith('B') && table.table_number !== 'Big Table') {
+  if (table.table_number?.startsWith('B') && table.table_number !== 'BT') {
     return { w: 12, h: 12 }
   }
   return table.rotated ? { w: 16, h: 20 } : { w: 20, h: 16 }
@@ -20,12 +20,12 @@ function getTableSize(table) {
 function getTableColor(table, assignedReservations) {
   if (!table.is_bookable) return '#9ca3af'
   if (table.locked_until && new Date(table.locked_until) > new Date()) return '#7c3aed'
-  if (table.table_number === 'Big Table') {
+  if (table.table_number === 'BT') {
     if (assignedReservations.some(r => r.status === 'seated')) return '#16a34a'
     if (assignedReservations.length > 0) return '#ca8a04'
     return '#1B3A6B'
   }
-  if (table.table_number?.startsWith('B') && table.table_number !== 'Big Table') {
+  if (table.table_number?.startsWith('B') && table.table_number !== 'BT') {
     if (assignedReservations.some(r => r.status === 'seated')) return '#16a34a'
     if (assignedReservations.length > 0) return '#ca8a04'
     return '#1B3A6B'
@@ -90,7 +90,7 @@ const DEFAULT_TABLES = [
   })),
   {
     id: 'table-big',
-    table_number: 'Big Table',
+    table_number: 'BT',
     capacity: 8,
     x_position: 260,
     y_position: 180,
@@ -364,7 +364,7 @@ export default function Tables() {
               const label = getTableLabel(table, assigned)
               const isSelected = selected === table.id
 
-              const isBarStool = table.table_number?.startsWith('B') && table.table_number !== 'Big Table'
+              const isBarStool = table.table_number?.startsWith('B') && table.table_number !== 'BT'
 
               return (
                 <g key={table.id}

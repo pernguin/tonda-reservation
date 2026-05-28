@@ -135,7 +135,8 @@ function getFixedSlots(sessions) {
     const [h, m] = session.start.split(':').map(Number)
     const ampm = h >= 12 ? 'PM' : 'AM'
     const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
-    return { value: session.start, label: `${hour}:${String(m).padStart(2, '0')} ${ampm}` }
+    const defaultLabel = `${hour}:${String(m).padStart(2, '0')} ${ampm}`
+    return { value: session.start, label: session.label || defaultLabel }
   })
 }
 

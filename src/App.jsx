@@ -13,6 +13,7 @@ import SlotRules from './pages/admin/SlotRules'
 import Customers from './pages/admin/Customers'
 import Login from './pages/admin/Login'
 import RequireAuth from './components/RequireAuth'
+import AdminNav from './components/AdminNav'
 
 function Layout() {
   const location = useLocation()
@@ -21,6 +22,7 @@ function Layout() {
   return (
     <>
       {!isHome && <Navbar />}
+      {location.pathname.startsWith('/admin') && location.pathname !== '/admin/login' && <AdminNav />}
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/reservations" element={<Reservations />} />

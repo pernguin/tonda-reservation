@@ -140,6 +140,120 @@ function getFixedSlots(sessions) {
   })
 }
 
+async function autoAssignTables(reservationId, reservationDate, reservationTime, guestCount) {
+  try {
+    const { data: allTables } = await supabase
+      .from('restaurant_tables')
+      .select('*')
+      .eq('is_bookable', true)
+
+    if (!allTables || allTables.length === 0) return
+
+    const [resH, resM] = reservationTime.split(':').map(Number)
+    const resMins = resH * 60 + resM
+    const resEnd = resMins + 120
+
+    const availableTables = allTables.filter(table => {
+      if (!table.locked_until) return true
+      const lockedUntil = new Date(table.locked_until)
+      const lockedUntilMins = lockedUntil.getHours() * 60 + lockedUntil.getMinutes()
+      return lockedUntilMins <= resMins
+    })
+
+    const { data: existingReservations } = await supabase
+      .from('reservations')
+      .select('*')
+      .eq('reservation_date', reservationDate)
+      .in('status', ['confirmed', 'pending', 'seated'])
+      .neq('id', reservationId)
+
+    const conflictingTableIds = new Set()
+    for (const r of existingReservations || []) {
+      const [h, m] = r.reservation_time.split(':').map(Number)
+      const existStart = h * 60 + m
+      const existEnd = existStart + 120
+      const overlaps = resMins < existEnd && resEnd > existStart
+      if (overlaps && Array.isArray(r.table_ids)) {
+        r.table_ids.forEach(id => conflictingTableIds.add(id))
+      }
+    }
+
+    const freeTables = availableTables.filter(t => !conflictingTableIds.has(t.id))
+
+    if (freeTables.length === 0) return
+
+    const singleTable = freeTables
+      .filter(t => t.capacity >= guestCount)
+      .sort((a, b) => a.capacity - b.capacity)[0]
+
+    if (singleTable) {
+      const lockFrom = new Date()
+      lockFrom.setHours(resH, resM, 0, 0)
+      const lockUntil = new Date(lockFrom.getTime() + 2 * 60 * 60 * 1000)
+      await supabase.from('reservations').update({ table_ids: [singleTable.id] }).eq('id', reservationId)
+      await supabase.from('restaurant_tables').update({
+        locked_until: lockUntil.toISOString(),
+        locked_by_reservation: reservationId
+      }).eq('id', singleTable.id)
+      return
+    }
+
+    const sortedTables = [...freeTables].sort((a, b) => a.x_position - b.x_position)
+
+    for (let size = 2; size <= Math.min(4, sortedTables.length); size++) {
+      const combinations = getCombinations(sortedTables, size)
+      let bestCombo = null
+      let bestScore = Infinity
+
+      for (const combo of combinations) {
+        const totalCapacity = combo.reduce((sum, t) => sum + t.capacity, 0)
+        if (totalCapacity < guestCount) continue
+
+        let maxDist = 0
+        for (let i = 0; i < combo.length; i++) {
+          for (let j = i + 1; j < combo.length; j++) {
+            const dist = Math.sqrt(
+              Math.pow(combo[i].x_position - combo[j].x_position, 2) +
+              Math.pow(combo[i].y_position - combo[j].y_position, 2)
+            )
+            maxDist = Math.max(maxDist, dist)
+          }
+        }
+
+        if (maxDist < bestScore) {
+          bestScore = maxDist
+          bestCombo = combo
+        }
+      }
+
+      if (bestCombo) {
+        const tableIds = bestCombo.map(t => t.id)
+        const lockFrom = new Date()
+        lockFrom.setHours(resH, resM, 0, 0)
+        const lockUntil = new Date(lockFrom.getTime() + 2 * 60 * 60 * 1000)
+        await supabase.from('reservations').update({ table_ids: tableIds }).eq('id', reservationId)
+        await supabase.from('restaurant_tables').update({
+          locked_until: lockUntil.toISOString(),
+          locked_by_reservation: reservationId
+        }).in('id', tableIds)
+        return
+      }
+    }
+  } catch (err) {
+    console.error('Auto-assignment failed:', err)
+  }
+}
+
+function getCombinations(arr, size) {
+  if (size === 1) return arr.map(item => [item])
+  const result = []
+  for (let i = 0; i <= arr.length - size; i++) {
+    const rest = getCombinations(arr.slice(i + 1), size - 1)
+    rest.forEach(combo => result.push([arr[i], ...combo]))
+  }
+  return result
+}
+
 const BRAND = '#E8420A'
 const CREAM = '#FFFFFF'
 
@@ -237,6 +351,7 @@ export default function Reservations() {
         .single()
       if (bookingError) throw bookingError
       setBookingId(booking.id)
+      autoAssignTables(booking.id, form.reservation_date, form.reservation_time, parseInt(form.guest_count))
       const { data: msgData } = await supabase.from('settings').select('value').eq('key', 'confirmation_message_reservation').maybeSingle()
       if (msgData?.value) setConfirmationMessage(msgData.value)
       setSubmitted(true)

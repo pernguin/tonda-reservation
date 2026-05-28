@@ -11,8 +11,8 @@ function getTableSize(table) {
   if (table.table_number === 'Big Table') {
     return table.rotated ? { w: 18, h: 32 } : { w: 32, h: 18 }
   }
-  if (table.table_number?.startsWith('Bar')) {
-    return { w: 22, h: 14 }
+  if (table.table_number?.startsWith('B') && table.table_number !== 'Big Table') {
+    return { w: 12, h: 12 }
   }
   return table.rotated ? { w: 16, h: 20 } : { w: 20, h: 16 }
 }
@@ -24,7 +24,7 @@ function getTableColor(table, assignedReservations) {
     if (assignedReservations.length > 0) return '#ca8a04'
     return '#1B3A6B'
   }
-  if (table.table_number?.startsWith('Bar')) {
+  if (table.table_number?.startsWith('B') && table.table_number !== 'Big Table') {
     if (assignedReservations.some(r => r.status === 'seated')) return '#16a34a'
     if (assignedReservations.length > 0) return '#ca8a04'
     return '#1B3A6B'
@@ -348,6 +348,8 @@ export default function Tables() {
               const label = getTableLabel(table, assigned)
               const isSelected = selected === table.id
 
+              const isBarStool = table.table_number?.startsWith('B') && table.table_number !== 'Big Table'
+
               return (
                 <g key={table.id}
                   onClick={() => onTableClick(table)}
@@ -355,29 +357,52 @@ export default function Tables() {
                   onTouchStart={e => onTouchStart(e, table)}
                   onTouchEnd={e => onTouchEnd(e, table)}
                   style={{ cursor: mode === 'layout' ? 'grab' : 'pointer', userSelect: 'none' }}>
-                  <rect
-                    x={table.x_position} y={table.y_position}
-                    width={w} height={h} rx="2"
-                    fill={color}
-                    stroke={isSelected ? '#3b82f6' : 'transparent'}
-                    strokeWidth="2"
-                    opacity="0.9"
-                  />
-                  <text
-                    x={table.x_position + w / 2}
-                    y={table.y_position + h / 2 - (label.line2 ? 3 : 0)}
-                    textAnchor="middle" dominantBaseline="central"
-                    fontSize="5.5" fill="white" fontWeight="600">
-                    {label.line1}
-                  </text>
-                  {label.line2 && (
-                    <text
-                      x={table.x_position + w / 2}
-                      y={table.y_position + h / 2 + 6}
-                      textAnchor="middle" dominantBaseline="central"
-                      fontSize="4.5" fill="white" opacity="0.9">
-                      {label.line2}
-                    </text>
+                  {isBarStool ? (
+                    <>
+                      <circle
+                        cx={table.x_position + w / 2}
+                        cy={table.y_position + h / 2}
+                        r={w / 2}
+                        fill={color}
+                        stroke={isSelected ? '#3b82f6' : 'transparent'}
+                        strokeWidth="2"
+                        opacity="0.9"
+                      />
+                      <text
+                        x={table.x_position + w / 2}
+                        y={table.y_position + h / 2}
+                        textAnchor="middle" dominantBaseline="central"
+                        fontSize="4" fill="white" fontWeight="600">
+                        {label.line1}
+                      </text>
+                    </>
+                  ) : (
+                    <>
+                      <rect
+                        x={table.x_position} y={table.y_position}
+                        width={w} height={h} rx="2"
+                        fill={color}
+                        stroke={isSelected ? '#3b82f6' : 'transparent'}
+                        strokeWidth="2"
+                        opacity="0.9"
+                      />
+                      <text
+                        x={table.x_position + w / 2}
+                        y={table.y_position + h / 2 - (label.line2 ? 3 : 0)}
+                        textAnchor="middle" dominantBaseline="central"
+                        fontSize="5.5" fill="white" fontWeight="600">
+                        {label.line1}
+                      </text>
+                      {label.line2 && (
+                        <text
+                          x={table.x_position + w / 2}
+                          y={table.y_position + h / 2 + 6}
+                          textAnchor="middle" dominantBaseline="central"
+                          fontSize="4.5" fill="white" opacity="0.9">
+                          {label.line2}
+                        </text>
+                      )}
+                    </>
                   )}
                 </g>
               )
@@ -447,7 +472,11 @@ export default function Tables() {
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-gray-400 inline-block"></span> Blocked</span>
                   <span className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded inline-block" style={{ backgroundColor: '#1B3A6B' }}></span>
-                    Big Table & Bar
+                    Big Table
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#1B3A6B' }}></span>
+                    Bar Stool
                   </span>
                 </div>
               </div>

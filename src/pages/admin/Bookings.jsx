@@ -41,6 +41,40 @@ export default function Bookings() {
 
   async function updateStatus(table, id, status) {
     await supabase.from(table).update({ status }).eq('id', id)
+
+    // When reservation is completed, release locks and unmerge any merged tables
+    if (table === 'reservations' && status === 'completed') {
+      const reservation = reservations.find(r => r.id === id)
+      if (reservation && Array.isArray(reservation.table_ids) && reservation.table_ids.length > 0) {
+        // Release locks on all assigned tables
+        await supabase
+          .from('restaurant_tables')
+          .update({ locked_until: null, locked_by_reservation: null })
+          .in('id', reservation.table_ids)
+
+        // Find any table groups that contain these tables and unmerge them
+        const { data: groupedTables } = await supabase
+          .from('restaurant_tables')
+          .select('id, group_id')
+          .in('id', reservation.table_ids)
+          .not('group_id', 'is', null)
+
+        if (groupedTables && groupedTables.length > 0) {
+          const groupIds = [...new Set(groupedTables.map(t => t.group_id))]
+          // Clear group_id from all tables in these groups
+          await supabase
+            .from('restaurant_tables')
+            .update({ group_id: null })
+            .in('group_id', groupIds)
+          // Delete the group records
+          await supabase
+            .from('table_groups')
+            .delete()
+            .in('id', groupIds)
+        }
+      }
+    }
+
     fetchAll()
   }
 

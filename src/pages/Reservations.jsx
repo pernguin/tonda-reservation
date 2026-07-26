@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
+import { supabaseCustomers } from '../supabaseCustomers'
 
 async function getDateInfo(date) {
   const dateObj = new Date(date)
@@ -257,6 +258,13 @@ function getCombinations(arr, size) {
 const BRAND = '#E8420A'
 const CREAM = '#FFFFFF'
 
+function normalisePhone(raw) {
+  let p = raw.replace(/[\s\-\(\)]/g, '')
+  if (p.startsWith('+')) p = p.slice(1)
+  if (p.startsWith('0')) p = '60' + p.slice(1)
+  return p
+}
+
 const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400"
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
 
@@ -274,9 +282,37 @@ export default function Reservations() {
   const [confirmationMessage, setConfirmationMessage] = useState('Thank you for your reservation request. Our team will contact you shortly to confirm your booking.')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [existingCustomer, setExistingCustomer] = useState(undefined)
+  const [birthdayInput, setBirthdayInput] = useState('')
+  const [birthdaySkipped, setBirthdaySkipped] = useState(false)
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value })
+    const { name, value } = e.target
+    setForm(prev => ({ ...prev, [name]: value }))
+    if (name === 'phone') {
+      setExistingCustomer(undefined)
+      setBirthdayInput('')
+      setBirthdaySkipped(false)
+    }
+  }
+
+  async function handlePhoneBlur() {
+    const normalised = normalisePhone(form.phone)
+    if (!normalised) return
+    setForm(prev => ({ ...prev, phone: normalised }))
+    const { data } = await supabaseCustomers
+      .from('customers')
+      .select('id, full_name, email, birthdate')
+      .eq('phone', normalised)
+      .maybeSingle()
+    setExistingCustomer(data || null)
+    if (data) {
+      setForm(prev => ({
+        ...prev,
+        full_name: prev.full_name || data.full_name || '',
+        email: prev.email || data.email || ''
+      }))
+    }
   }
 
   async function handleDateChange(e) {
@@ -328,17 +364,28 @@ export default function Reservations() {
       const availability = await checkAvailability(form.reservation_date, form.reservation_time, parseInt(form.guest_count))
       if (!availability.available) { setError(availability.reason); setLoading(false); return }
 
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .insert([{ full_name: form.full_name, phone: form.phone, email: form.email }])
-        .select().single()
-      if (customerError) throw customerError
+      const normalisedPhone = normalisePhone(form.phone)
+
+      let customerId
+      if (existingCustomer) {
+        customerId = existingCustomer.id
+        if (birthdayInput && !birthdaySkipped) {
+          await supabaseCustomers.from('customers').update({ birthdate: birthdayInput }).eq('id', existingCustomer.id)
+        }
+      } else {
+        const { data: customer, error: customerError } = await supabaseCustomers
+          .from('customers')
+          .insert([{ full_name: form.full_name, phone: normalisedPhone, email: form.email, birthdate: birthdayInput || null }])
+          .select().single()
+        if (customerError) throw customerError
+        customerId = customer.id
+      }
 
       const autoConfirm = availability.autoConfirm && !availability.manualOnly
       const { data: booking, error: bookingError } = await supabase
         .from('reservations')
         .insert([{
-          customer_id: customer.id,
+          customer_id: customerId,
           reservation_date: form.reservation_date,
           reservation_time: form.reservation_time,
           guest_count: parseInt(form.guest_count),
@@ -436,9 +483,24 @@ function CopyButton({ text }) {
 
           <div>
             <label className={labelClass}>Phone Number *</label>
-            <input name="phone" value={form.phone} onChange={handleChange} required
+            <input name="phone" value={form.phone} onChange={handleChange} onBlur={handlePhoneBlur} required
               placeholder="+60 12 345 6789"
               className={inputClass} />
+            {existingCustomer && !existingCustomer.birthdate && !birthdaySkipped && (
+              <div className="mt-3">
+                <p className="text-xs text-gray-500 mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
+                <div className="flex items-center gap-4">
+                  <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
+                    className={inputClass} />
+                  <button type="button"
+                    onClick={() => { setBirthdaySkipped(true); setBirthdayInput('') }}
+                    className="text-xs tracking-widest uppercase shrink-0 transition-opacity hover:opacity-70"
+                    style={{ color: BRAND }}>
+                    Skip
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -447,6 +509,15 @@ function CopyButton({ text }) {
               placeholder="your@email.com"
               className={inputClass} />
           </div>
+
+          {existingCustomer === null && (
+            <div>
+              <label className={labelClass}>Birthday (optional)</label>
+              <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
+                className={inputClass} />
+              <p className="text-xs text-gray-400 mt-1">We'd love to celebrate with you 🎂</p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-6">
             <div>

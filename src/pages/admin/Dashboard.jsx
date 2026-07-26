@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabase'
+import { supabaseCustomers } from '../../supabaseCustomers'
 import { Link } from 'react-router-dom'
 
 const BRAND = '#E8420A'
@@ -15,7 +16,7 @@ export default function Dashboard() {
         supabase.from('reservations').select('id', { count: 'exact' }),
         supabase.from('events').select('id', { count: 'exact' }),
         supabase.from('offsite_bookings').select('id', { count: 'exact' }),
-        supabase.from('customers').select('id', { count: 'exact' })
+        supabaseCustomers.from('customers').select('id', { count: 'exact' })
       ])
       setStats({
         reservations: r.count || 0,

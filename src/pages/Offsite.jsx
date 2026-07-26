@@ -1,5 +1,13 @@
 import { useState } from 'react'
 import { supabase } from '../supabase'
+import { supabaseCustomers } from '../supabaseCustomers'
+
+function normalisePhone(raw) {
+  let p = raw.replace(/[\s\-\(\)]/g, '')
+  if (p.startsWith('+')) p = p.slice(1)
+  if (p.startsWith('0')) p = '60' + p.slice(1)
+  return p
+}
 
 const BRAND = '#E8420A'
 const CREAM = '#FFFFFF'
@@ -45,9 +53,9 @@ export default function Offsite() {
     setError(null)
 
     try {
-      const { data: customer, error: customerError } = await supabase
+      const { data: customer, error: customerError } = await supabaseCustomers
         .from('customers')
-        .insert([{ full_name: form.full_name, phone: form.phone, email: form.email }])
+        .insert([{ full_name: form.full_name, phone: normalisePhone(form.phone), email: form.email }])
         .select()
         .single()
 

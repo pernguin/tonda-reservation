@@ -9,6 +9,7 @@ export default function AdminNav() {
         {[
           { to: '/admin', label: 'Dashboard' },
           { to: '/admin/bookings', label: 'Bookings' },
+          { to: '/admin/experiences', label: 'Experiences' },
           { to: '/admin/tables', label: 'Floor Plan' },
           { to: '/admin/slot-rules', label: 'Slot Rules' },
           { to: '/admin/customers', label: 'Customers' },

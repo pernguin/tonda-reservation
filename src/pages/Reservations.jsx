@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers } from '../supabaseCustomers'
 
@@ -269,6 +270,7 @@ const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm 
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
 
 export default function Reservations() {
+  const navigate = useNavigate()
   const [form, setForm] = useState({
     full_name: '', phone: '', email: '',
     reservation_date: '', reservation_time: '',
@@ -286,6 +288,21 @@ export default function Reservations() {
   const [existingCustomer, setExistingCustomer] = useState(undefined)
   const [birthdayInput, setBirthdayInput] = useState('')
   const [birthdaySkipped, setBirthdaySkipped] = useState(false)
+  const [experiences, setExperiences] = useState([])
+
+  useEffect(() => {
+    async function fetchExperiences() {
+      const today = new Date().toISOString().split('T')[0]
+      const { data } = await supabase
+        .from('experiences')
+        .select('*')
+        .eq('status', 'published')
+        .gte('date', today)
+        .order('date', { ascending: true })
+      setExperiences(data || [])
+    }
+    fetchExperiences()
+  }, [])
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -460,9 +477,12 @@ function CopyButton({ text }) {
     )
   }
 
+  const hasExperiences = experiences.length > 0
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
-      <div className="max-w-lg mx-auto px-8 py-16">
+      <div className={`max-w-[900px] mx-auto px-8 py-16 flex flex-col gap-12 ${hasExperiences ? 'md:flex-row md:items-start' : ''}`}>
+      <div className={hasExperiences ? 'w-full md:w-[65%]' : 'w-full max-w-lg mx-auto'}>
 
         <p className="text-xs tracking-widest uppercase mb-2" style={{ color: BRAND }}>
           Tonda Pizza Romana
@@ -587,6 +607,29 @@ function CopyButton({ text }) {
             {loading ? 'Submitting...' : 'Request Reservation'}
           </button>
         </form>
+      </div>
+
+        {hasExperiences && (
+          <div className="w-full md:w-[35%]">
+            <label className={labelClass}>Upcoming Experiences</label>
+            <div className="space-y-6 mt-3">
+              {experiences.map(exp => (
+                <div key={exp.id}
+                  onClick={() => navigate(`/experiences/${exp.id}`)}
+                  className="cursor-pointer group">
+                  <div className="w-full aspect-square rounded-lg bg-gray-100 overflow-hidden mb-2">
+                    {exp.poster_url
+                      ? <img src={exp.poster_url} alt={exp.name} className="w-full h-full object-cover transition-opacity group-hover:opacity-80" />
+                      : <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">No image</div>}
+                  </div>
+                  <p className="text-sm font-medium text-gray-900 truncate">{exp.name}</p>
+                  <p className="text-xs text-gray-400">{exp.date} · {exp.time?.slice(0, 5)}</p>
+                  <p className="text-xs text-gray-400">{exp.price == null ? 'Free' : `RM ${Number(exp.price).toFixed(2)}`}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -6,6 +6,7 @@ import Home from './pages/Home'
 import Reservations from './pages/Reservations'
 import Events from './pages/Events'
 import Offsite from './pages/Offsite'
+import ExperienceDetail from './pages/ExperienceDetail'
 import Dashboard from './pages/admin/Dashboard'
 import Tables from './pages/admin/Tables'
 import Bookings from './pages/admin/Bookings'
@@ -15,6 +16,7 @@ import Login from './pages/admin/Login'
 import RequireAuth from './components/RequireAuth'
 import AdminNav from './components/AdminNav'
 import Settings from './pages/admin/Settings'
+import Experiences from './pages/admin/Experiences'
 
 function Layout() {
   const location = useLocation()
@@ -29,6 +31,7 @@ function Layout() {
         <Route path="/reservations" element={<Reservations />} />
         <Route path="/events" element={<Events />} />
         <Route path="/offsite" element={<Offsite />} />
+        <Route path="/experiences/:id" element={<ExperienceDetail />} />
         <Route path="/booking/:id" element={<ManageBooking />} />
         <Route path="/admin/login" element={<Login />} />
         <Route path="/admin" element={<RequireAuth><Dashboard /></RequireAuth>} />
@@ -37,6 +40,7 @@ function Layout() {
         <Route path="/admin/slot-rules" element={<RequireAuth><SlotRules /></RequireAuth>} />
         <Route path="/admin/customers" element={<RequireAuth><Customers /></RequireAuth>} />
         <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+        <Route path="/admin/experiences" element={<RequireAuth><Experiences /></RequireAuth>} />
       </Routes>
       {!isHome && <Footer />}
     </>

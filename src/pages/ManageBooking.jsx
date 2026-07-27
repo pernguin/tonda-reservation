@@ -134,6 +134,18 @@ export default function ManageBooking() {
                 <p className="text-sm text-gray-700 mt-1">{booking.notes}</p>
               </div>
             )}
+            {booking.baby_chairs > 0 && (
+              <div className="mt-4">
+                <p className="text-xs text-gray-400">Baby Chairs</p>
+                <p className="text-sm text-gray-700 mt-1">{booking.baby_chairs}</p>
+              </div>
+            )}
+            {booking.pets && (
+              <div className="mt-4">
+                <p className="text-xs text-gray-400">Pets</p>
+                <p className="text-sm text-gray-700 mt-1">Yes</p>
+              </div>
+            )}
           </div>
 
           <p className="text-xs text-gray-400 leading-relaxed">

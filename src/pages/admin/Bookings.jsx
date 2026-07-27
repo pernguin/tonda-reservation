@@ -222,6 +222,8 @@ export default function Bookings() {
             <p className="text-xs text-gray-500 mb-1">📅 {r.reservation_date} at {r.reservation_time}</p>
             {r.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {r.customers.email}</p>}
             {r.notes && <p className="text-xs text-gray-500 mb-1">📝 {r.notes}</p>}
+            {r.baby_chairs > 0 && <p className="text-xs text-gray-500 mb-1">🍼 Baby Chairs: {r.baby_chairs}</p>}
+            {r.pets && <p className="text-xs text-gray-500 mb-1">🐾 Pets: Yes</p>}
             {tableNums && <p className="text-xs text-gray-500 mb-2">🪑 {tableNums}</p>}
             <ActionButtons table="reservations" id={r.id} />
           </div>

@@ -272,7 +272,8 @@ export default function Reservations() {
   const [form, setForm] = useState({
     full_name: '', phone: '', email: '',
     reservation_date: '', reservation_time: '',
-    guest_count: '', notes: ''
+    guest_count: '', notes: '',
+    baby_chairs: 0, pets: false
   })
   const [dateInfo, setDateInfo] = useState(null)
   const [dateLoading, setDateLoading] = useState(false)
@@ -287,8 +288,8 @@ export default function Reservations() {
   const [birthdaySkipped, setBirthdaySkipped] = useState(false)
 
   const handleChange = (e) => {
-    const { name, value } = e.target
-    setForm(prev => ({ ...prev, [name]: value }))
+    const { name, value, type, checked } = e.target
+    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
     if (name === 'phone') {
       setExistingCustomer(undefined)
       setBirthdayInput('')
@@ -390,6 +391,8 @@ export default function Reservations() {
           reservation_time: form.reservation_time,
           guest_count: parseInt(form.guest_count),
           notes: form.notes,
+          baby_chairs: parseInt(form.baby_chairs) || 0,
+          pets: form.pets,
           status: autoConfirm ? 'confirmed' : 'pending',
           table_type: availability.type,
           tables_count: availability.count
@@ -554,6 +557,22 @@ function CopyButton({ text }) {
           {dateInfo && timeSlots.length === 0 && (
             <p className="text-sm" style={{ color: BRAND }}>No available time slots for this date.</p>
           )}
+
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <label className={labelClass}>Baby Chairs</label>
+              <input name="baby_chairs" type="number" min="0"
+                value={form.baby_chairs} onChange={handleChange}
+                className={inputClass} />
+            </div>
+            <div className="flex items-end pb-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input name="pets" type="checkbox" checked={form.pets} onChange={handleChange}
+                  className="w-4 h-4" />
+                I'm bringing a pet 🐾
+              </label>
+            </div>
+          </div>
 
           <div>
             <label className={labelClass}>Special Requests</label>

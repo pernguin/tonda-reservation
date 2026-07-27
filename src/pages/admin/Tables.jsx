@@ -36,6 +36,13 @@ function getTableColor(table, assignedReservations) {
   return '#E8420A'
 }
 
+function getReservationIcons(r) {
+  let icons = ''
+  if (r.baby_chairs > 0) icons += ' 🍼'
+  if (r.pets) icons += ' 🐾'
+  return icons
+}
+
 function getTableLabel(table, assignedReservations) {
   const now = new Date()
   const currentMins = now.getHours() * 60 + now.getMinutes()
@@ -43,7 +50,7 @@ function getTableLabel(table, assignedReservations) {
   const seated = assignedReservations.find(r => r.status === 'seated')
   if (seated) {
     const name = seated.customers?.full_name?.split(' ')[0] || '?'
-    return { line1: name, line2: 'Seated' }
+    return { line1: name + getReservationIcons(seated), line2: 'Seated' }
   }
 
   const upcoming = assignedReservations
@@ -61,7 +68,7 @@ function getTableLabel(table, assignedReservations) {
     const ampm = h >= 12 ? 'pm' : 'am'
     const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
     const time = `${hour}:${String(m).padStart(2, '0')}${ampm}`
-    return { line1: name, line2: time }
+    return { line1: name + getReservationIcons(upcoming), line2: time }
   }
 
   return { line1: table.table_number, line2: null }
@@ -613,7 +620,7 @@ export default function Tables() {
               ) : (
                 unassigned.map(r => (
                   <div key={r.id} className="border border-gray-200 rounded-lg p-3 mb-2">
-                    <p className="font-semibold text-sm">{r.customers?.full_name}</p>
+                    <p className="font-semibold text-sm">{r.customers?.full_name}{getReservationIcons(r)}</p>
                     <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
                       {r.status}
@@ -657,7 +664,7 @@ export default function Tables() {
                     <div key={r.id} className="border border-gray-200 rounded-lg p-3 mb-2">
                       <div className="flex justify-between items-start">
                         <div>
-                          <p className="font-semibold text-sm">{r.customers?.full_name}</p>
+                          <p className="font-semibold text-sm">{r.customers?.full_name}{getReservationIcons(r)}</p>
                           <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
                           {(() => {
                             const assigned = getAssignedCapacity(r.id)
@@ -694,7 +701,7 @@ export default function Tables() {
                   <div key={r.id}
                     className="border border-gray-200 rounded-lg p-3 mb-2 cursor-pointer hover:border-black transition-colors"
                     onClick={() => assignTable(selectedTable.id, r.id)}>
-                    <p className="font-semibold text-sm">{r.customers?.full_name}</p>
+                    <p className="font-semibold text-sm">{r.customers?.full_name}{getReservationIcons(r)}</p>
                     <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
                       {r.status}

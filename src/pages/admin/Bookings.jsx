@@ -136,11 +136,20 @@ export default function Bookings() {
     )
   }
 
+  const filteredUpcomingRes     = applyFilters(upcomingRes, 'reservation_date')
+  const filteredUpcomingEvents  = applyFilters(upcomingEvents, 'event_date')
+  const filteredUpcomingOffsite = applyFilters(upcomingOffsite, 'event_date')
+  const filteredPastRes         = applyFilters(pastRes, 'reservation_date')
+  const filteredPastEvents      = applyFilters(pastEvents, 'event_date')
+  const filteredPastOffsite     = applyFilters(pastOffsite, 'event_date')
+  const filteredActiveEvents    = applyFilters(activeEvents, 'event_date')
+  const filteredActiveOffsite   = applyFilters(activeOffsite, 'event_date')
+
   const tabs = [
-    { key: 'upcoming', label: `Upcoming (${upcomingRes.length + upcomingEvents.length + upcomingOffsite.length})` },
-    { key: 'past',     label: `Past (${pastRes.length + pastEvents.length + pastOffsite.length})` },
-    { key: 'events',   label: `Events (${activeEvents.length})` },
-    { key: 'offsite',  label: `Off-Site (${activeOffsite.length})` },
+    { key: 'upcoming', label: `Upcoming (${filteredUpcomingRes.length + filteredUpcomingEvents.length + filteredUpcomingOffsite.length})` },
+    { key: 'past',     label: `Past (${filteredPastRes.length + filteredPastEvents.length + filteredPastOffsite.length})` },
+    { key: 'events',   label: `Events (${filteredActiveEvents.length})` },
+    { key: 'offsite',  label: `Off-Site (${filteredActiveOffsite.length})` },
   ]
 
   function EmptyState({ message = 'No bookings found.' }) {
@@ -316,9 +325,9 @@ export default function Bookings() {
 
   function TabContent() {
     if (tab === 'upcoming') {
-      const res  = applyFilters(upcomingRes, 'reservation_date')
-      const evts = applyFilters(upcomingEvents, 'event_date')
-      const off  = applyFilters(upcomingOffsite, 'event_date')
+      const res  = filteredUpcomingRes
+      const evts = filteredUpcomingEvents
+      const off  = filteredUpcomingOffsite
       if (res.length + evts.length + off.length === 0) return <EmptyState message="No upcoming bookings." />
       return (
         <>
@@ -330,9 +339,9 @@ export default function Bookings() {
       )
     }
     if (tab === 'past') {
-      const res  = applyFilters(pastRes, 'reservation_date')
-      const evts = applyFilters(pastEvents, 'event_date')
-      const off  = applyFilters(pastOffsite, 'event_date')
+      const res  = filteredPastRes
+      const evts = filteredPastEvents
+      const off  = filteredPastOffsite
       if (res.length + evts.length + off.length === 0) return <EmptyState message="No past bookings." />
       return (
         <>
@@ -344,7 +353,7 @@ export default function Bookings() {
       )
     }
     if (tab === 'events') {
-      const evts = applyFilters(activeEvents, 'event_date')
+      const evts = filteredActiveEvents
       if (evts.length === 0) return <EmptyState message="No events found." />
       return (
         <>
@@ -354,7 +363,7 @@ export default function Bookings() {
       )
     }
     if (tab === 'offsite') {
-      const off = applyFilters(activeOffsite, 'event_date')
+      const off = filteredActiveOffsite
       if (off.length === 0) return <EmptyState message="No off-site bookings found." />
       return (
         <>

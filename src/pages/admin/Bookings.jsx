@@ -109,6 +109,7 @@ export default function Bookings() {
   const activeOffsite   = offsite.filter(o => o.status !== 'cancelled')
 
   function applyFilters(items, dateField) {
+    console.log('applyFilters:', { filterDate, firstItemDate: items[0]?.[dateField], match: items[0] ? items[0][dateField] === filterDate : null })
     return items.filter(item =>
       (!filterDate || item[dateField] === filterDate) &&
       (!filterStatus || item.status === filterStatus)

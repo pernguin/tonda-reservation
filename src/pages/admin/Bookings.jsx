@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabase'
+import { logVisitFromReservation } from '../../lib/customerVisits'
 
 const BRAND = '#E8420A'
 
@@ -41,6 +42,11 @@ export default function Bookings() {
 
   async function updateStatus(table, id, status) {
     await supabase.from(table).update({ status }).eq('id', id)
+
+    if (table === 'reservations' && (status === 'completed' || status === 'no_show')) {
+      const reservation = reservations.find(r => r.id === id)
+      if (reservation) logVisitFromReservation(reservation, status, 'tonda')
+    }
 
     // When reservation is completed, release locks and unmerge any merged tables
     if (table === 'reservations' && status === 'completed') {

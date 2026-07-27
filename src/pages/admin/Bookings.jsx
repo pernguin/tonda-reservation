@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabase'
+import { supabaseCustomers } from '../../supabaseCustomers'
 import { logVisitFromReservation } from '../../lib/customerVisits'
 
 const BRAND = '#E8420A'
@@ -33,14 +34,34 @@ export default function Bookings() {
   async function fetchAll() {
     setLoading(true)
     const [r, e, o, t] = await Promise.all([
-      supabase.from('reservations').select('*, customers(full_name, phone, email)').order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
-      supabase.from('events').select('*, customers(full_name, phone, email)').order('event_date', { ascending: true }),
-      supabase.from('offsite_bookings').select('*, customers(full_name, phone, email)').order('event_date', { ascending: true }),
+      supabase.from('reservations').select('*').order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
+      supabase.from('events').select('*').order('event_date', { ascending: true }),
+      supabase.from('offsite_bookings').select('*').order('event_date', { ascending: true }),
       supabase.from('restaurant_tables').select('id, table_number')
     ])
-    setReservations(r.data || [])
-    setEvents(e.data || [])
-    setOffsite(o.data || [])
+
+    const reservationsData = r.data || []
+    const eventsData = e.data || []
+    const offsiteData = o.data || []
+
+    const customerIds = [...new Set(
+      [...reservationsData, ...eventsData, ...offsiteData]
+        .map(row => row.customer_id)
+        .filter(Boolean)
+    )]
+
+    let customersById = {}
+    if (customerIds.length > 0) {
+      const { data: customersData } = await supabaseCustomers
+        .from('customers')
+        .select('id, full_name, phone, email')
+        .in('id', customerIds)
+      customersById = Object.fromEntries((customersData || []).map(c => [c.id, c]))
+    }
+
+    setReservations(reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
+    setEvents(eventsData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
+    setOffsite(offsiteData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
     setTables(t.data || [])
     setLoading(false)
   }

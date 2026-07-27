@@ -4,6 +4,11 @@ import { logVisitFromReservation } from '../../lib/customerVisits'
 
 const BRAND = '#E8420A'
 
+function getLocalToday() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 const statusColors = {
   pending: 'bg-yellow-100 text-yellow-800',
   confirmed: 'bg-blue-100 text-blue-800',
@@ -20,7 +25,7 @@ export default function Bookings() {
   const [tables, setTables] = useState([])
   const [tab, setTab] = useState('upcoming')
   const [loading, setLoading] = useState(true)
-  const [filterDate, setFilterDate] = useState('')
+  const [filterDate, setFilterDate] = useState(getLocalToday())
   const [filterStatus, setFilterStatus] = useState('')
 
   useEffect(() => { fetchAll() }, [])
@@ -92,8 +97,7 @@ export default function Bookings() {
       .join(', ')
   }
 
-  const now = new Date()
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const today = getLocalToday()
 
   const upcomingRes     = reservations.filter(r => r.reservation_date >= today && r.status !== 'cancelled')
   const pastRes         = reservations.filter(r => r.reservation_date < today || r.status === 'cancelled')

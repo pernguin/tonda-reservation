@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../supabase'
+import { supabaseCustomers } from '../../supabaseCustomers'
 
 const FLOOR_POINTS = [
   [30, 80], [30, 320], [370, 320], [370, 30],
@@ -157,13 +158,26 @@ export default function Tables() {
     const [{ data: tableData }, { data: resData }] = await Promise.all([
       supabase.from('restaurant_tables').select('*'),
       supabase.from('reservations')
-        .select('*, customers(full_name, phone, email)')
+        .select('*')
         .eq('reservation_date', today)
         .in('status', ['confirmed', 'pending', 'seated'])
         .order('reservation_time', { ascending: true })
     ])
+
+    const reservationsData = resData || []
+    const customerIds = [...new Set(reservationsData.map(r => r.customer_id).filter(Boolean))]
+
+    let customersById = {}
+    if (customerIds.length > 0) {
+      const { data: customersData } = await supabaseCustomers
+        .from('customers')
+        .select('id, full_name, phone, email')
+        .in('id', customerIds)
+      customersById = Object.fromEntries((customersData || []).map(c => [c.id, c]))
+    }
+
     setTables((tableData || []).map(t => ({ ...t, rotated: t.rotated || false })))
-    setReservations(resData || [])
+    setReservations(reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
   }
 
   async function saveTables() {

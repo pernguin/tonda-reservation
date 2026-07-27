@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../supabase'
+import { supabaseCustomers } from '../supabaseCustomers'
 
 const BRAND = '#E8420A'
 const CREAM = '#FFFFFF'
@@ -20,14 +21,26 @@ export default function ManageBooking() {
     setLoading(true)
     const { data, error } = await supabase
       .from('reservations')
-      .select('*, customers(full_name, phone, email)')
+      .select('*')
       .eq('id', id)
       .single()
     if (error || !data) {
       setError('Booking not found.')
-    } else {
-      setBooking(data)
+      setLoading(false)
+      return
     }
+
+    let customer
+    if (data.customer_id) {
+      const { data: customerData } = await supabaseCustomers
+        .from('customers')
+        .select('id, full_name, phone, email')
+        .eq('id', data.customer_id)
+        .single()
+      customer = customerData
+    }
+
+    setBooking({ ...data, customers: customer })
     setLoading(false)
   }
 

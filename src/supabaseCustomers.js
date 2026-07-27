@@ -1,7 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 
 export const supabaseCustomers = createClient(
-  'https://gvncofccucoejwawjvdv.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2bmNvZmNjdWNvZWp3YXdqdmR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4MjIxNjgsImV4cCI6MjA5NDM5ODE2OH0.yFPlxyBSq3_sDDWOiSN3YGatJGJzycJ3VBlTa2mtjrU',
-  { auth: { storageKey: 'supabase-customers-auth' } }
+  import.meta.env.VITE_ROUND_SUPABASE_URL,
+  import.meta.env.VITE_ROUND_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      storageKey: 'supabase-customers-auth'
+    }
+  }
 )

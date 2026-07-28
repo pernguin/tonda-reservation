@@ -13,24 +13,37 @@ export default function AdminNav() {
           { to: '/admin/tables', label: 'Floor Plan' },
           { to: '/admin/slot-rules', label: 'Slot Rules' },
           { to: '/admin/customers', label: 'Customers' },
+          { href: 'https://round-reservation.vercel.app/admin/feedback', label: 'Feedback' },
           { to: '/admin/settings', label: 'Settings' },
-        ].map(({ to, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/admin'}
-            className={({ isActive }) =>
-              `px-4 py-3 text-xs tracking-widest uppercase font-medium border-b-2 transition-colors ${
-                isActive
-                  ? 'border-b-2'
-                  : 'border-transparent text-gray-400 hover:text-gray-600'
-              }`
-            }
-            style={({ isActive }) => isActive ? { borderColor: BRAND, color: BRAND } : {}}
-          >
-            {label}
-          </NavLink>
-        ))}
+        ].map(({ to, href, label }) =>
+          href ? (
+            <a
+              key={href}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-3 text-xs tracking-widest uppercase font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              {label}
+            </a>
+          ) : (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/admin'}
+              className={({ isActive }) =>
+                `px-4 py-3 text-xs tracking-widest uppercase font-medium border-b-2 transition-colors ${
+                  isActive
+                    ? 'border-b-2'
+                    : 'border-transparent text-gray-400 hover:text-gray-600'
+                }`
+              }
+              style={({ isActive }) => isActive ? { borderColor: BRAND, color: BRAND } : {}}
+            >
+              {label}
+            </NavLink>
+          )
+        )}
       </div>
     </nav>
   )

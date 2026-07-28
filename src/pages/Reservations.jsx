@@ -390,6 +390,13 @@ export default function Reservations() {
         if (birthdayInput && !birthdaySkipped) {
           await supabaseCustomers.from('customers').update({ birthdate: birthdayInput }).eq('id', existingCustomer.id)
         }
+        if (form.email && form.email !== existingCustomer.email) {
+          const { error: emailUpdateError } = await supabaseCustomers
+            .from('customers')
+            .update({ email: form.email })
+            .eq('id', existingCustomer.id)
+          if (emailUpdateError) console.error('Failed to update customer email:', emailUpdateError)
+        }
       } else {
         const { data: customer, error: customerError } = await supabaseCustomers
           .from('customers')

@@ -1,4 +1,5 @@
 import ManageBooking from './pages/ManageBooking'
+import Feedback from './pages/Feedback'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
@@ -21,10 +22,11 @@ import Experiences from './pages/admin/Experiences'
 function Layout() {
   const location = useLocation()
   const isHome = location.pathname === '/'
+  const isStandalone = isHome || location.pathname === '/feedback'
 
   return (
     <>
-      {!isHome && <Navbar />}
+      {!isStandalone && <Navbar />}
       {location.pathname.startsWith('/admin') && location.pathname !== '/admin/login' && <AdminNav />}
       <Routes>
         <Route path="/" element={<Home />} />
@@ -33,6 +35,7 @@ function Layout() {
         <Route path="/offsite" element={<Offsite />} />
         <Route path="/experiences/:id" element={<ExperienceDetail />} />
         <Route path="/booking/:id" element={<ManageBooking />} />
+        <Route path="/feedback" element={<Feedback />} />
         <Route path="/admin/login" element={<Login />} />
         <Route path="/admin" element={<RequireAuth><Dashboard /></RequireAuth>} />
         <Route path="/admin/tables" element={<RequireAuth><Tables /></RequireAuth>} />
@@ -42,7 +45,7 @@ function Layout() {
         <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
         <Route path="/admin/experiences" element={<RequireAuth><Experiences /></RequireAuth>} />
       </Routes>
-      {!isHome && <Footer />}
+      {!isStandalone && <Footer />}
     </>
   )
 }

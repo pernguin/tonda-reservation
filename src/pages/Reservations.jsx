@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
-import { supabaseCustomers } from '../supabaseCustomers'
+import { supabaseCustomers, findOrCreateCustomer } from '../supabaseCustomers'
 
 async function getDateInfo(date) {
   const dateObj = new Date(date)
@@ -382,29 +382,12 @@ export default function Reservations() {
       const availability = await checkAvailability(form.reservation_date, form.reservation_time, parseInt(form.guest_count))
       if (!availability.available) { setError(availability.reason); setLoading(false); return }
 
-      const normalisedPhone = normalisePhone(form.phone)
-
-      let customerId
-      if (existingCustomer) {
-        customerId = existingCustomer.id
-        if (birthdayInput && !birthdaySkipped) {
-          await supabaseCustomers.from('customers').update({ birthdate: birthdayInput }).eq('id', existingCustomer.id)
-        }
-        if (form.email && form.email !== existingCustomer.email) {
-          const { error: emailUpdateError } = await supabaseCustomers
-            .from('customers')
-            .update({ email: form.email })
-            .eq('id', existingCustomer.id)
-          if (emailUpdateError) console.error('Failed to update customer email:', emailUpdateError)
-        }
-      } else {
-        const { data: customer, error: customerError } = await supabaseCustomers
-          .from('customers')
-          .insert([{ full_name: form.full_name, phone: normalisedPhone, email: form.email, birthdate: birthdayInput || null }])
-          .select().single()
-        if (customerError) throw customerError
-        customerId = customer.id
-      }
+      const customerId = await findOrCreateCustomer({
+        full_name: form.full_name,
+        phone: form.phone,
+        email: form.email,
+        birthdate: !birthdaySkipped ? birthdayInput : null
+      })
 
       const autoConfirm = availability.autoConfirm && !availability.manualOnly
       const { data: booking, error: bookingError } = await supabase

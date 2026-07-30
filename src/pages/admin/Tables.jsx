@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
+import { getTableStatusForDate, getLocalToday, isToday } from '../../lib/tableAvailability'
 
 const FLOOR_POINTS = [
   [30, 80], [30, 320], [370, 320], [370, 30],
@@ -18,21 +19,22 @@ function getTableSize(table) {
   return table.rotated ? { w: 16, h: 20 } : { w: 20, h: 16 }
 }
 
-function getTableColor(table, assignedReservations) {
-  if (!table.is_bookable) return '#9ca3af'
-  if (table.locked_until && new Date(table.locked_until) > new Date()) return '#7c3aed'
+function getTableColor(table, status) {
+  const s = status?.status || 'free'
+  if (s === 'blocked') return '#9ca3af'
+  if (s === 'locked') return '#7c3aed'
   if (table.table_number === 'BT') {
-    if (assignedReservations.some(r => r.status === 'seated')) return '#16a34a'
-    if (assignedReservations.length > 0) return '#ca8a04'
+    if (s === 'seated') return '#16a34a'
+    if (s === 'reserved') return '#ca8a04'
     return '#1B3A6B'
   }
   if (table.table_number?.startsWith('B') && table.table_number !== 'BT') {
-    if (assignedReservations.some(r => r.status === 'seated')) return '#16a34a'
-    if (assignedReservations.length > 0) return '#ca8a04'
+    if (s === 'seated') return '#16a34a'
+    if (s === 'reserved') return '#ca8a04'
     return '#1B3A6B'
   }
-  if (assignedReservations.some(r => r.status === 'seated')) return '#16a34a'
-  if (assignedReservations.length > 0) return '#ca8a04'
+  if (s === 'seated') return '#16a34a'
+  if (s === 'reserved') return '#ca8a04'
   return '#E8420A'
 }
 
@@ -43,32 +45,55 @@ function getReservationIcons(r) {
   return icons
 }
 
-function getTableLabel(table, assignedReservations) {
-  const now = new Date()
-  const currentMins = now.getHours() * 60 + now.getMinutes()
+// `todayView` preserves the exact existing "today" behavior (live clock,
+// seated/upcoming). Other dates have no meaningful "now", so they just show
+// the day's earliest assigned reservation instead.
+function getTableLabel(table, assignedReservations, todayView) {
+  if (todayView) {
+    const now = new Date()
+    const currentMins = now.getHours() * 60 + now.getMinutes()
 
-  const seated = assignedReservations.find(r => r.status === 'seated')
-  if (seated) {
-    const name = seated.customers?.full_name?.split(' ')[0] || '?'
-    return { line1: name + getReservationIcons(seated), line2: 'Seated' }
+    const seated = assignedReservations.find(r => r.status === 'seated')
+    if (seated) {
+      const name = seated.customers?.full_name?.split(' ')[0] || '?'
+      return { line1: name + getReservationIcons(seated), line2: 'Seated' }
+    }
+
+    const upcoming = assignedReservations
+      .filter(r => r.status !== 'completed' && r.status !== 'cancelled')
+      .map(r => {
+        const [h, m] = r.reservation_time.split(':').map(Number)
+        return { ...r, mins: h * 60 + m }
+      })
+      .filter(r => r.mins >= currentMins)
+      .sort((a, b) => a.mins - b.mins)[0]
+
+    if (upcoming) {
+      const name = upcoming.customers?.full_name?.split(' ')[0] || '?'
+      const [h, m] = upcoming.reservation_time.split(':').map(Number)
+      const ampm = h >= 12 ? 'pm' : 'am'
+      const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
+      const time = `${hour}:${String(m).padStart(2, '0')}${ampm}`
+      return { line1: name + getReservationIcons(upcoming), line2: time }
+    }
+
+    return { line1: table.table_number, line2: null }
   }
 
-  const upcoming = assignedReservations
-    .filter(r => r.status !== 'completed' && r.status !== 'cancelled')
+  const earliest = assignedReservations
     .map(r => {
       const [h, m] = r.reservation_time.split(':').map(Number)
       return { ...r, mins: h * 60 + m }
     })
-    .filter(r => r.mins >= currentMins)
     .sort((a, b) => a.mins - b.mins)[0]
 
-  if (upcoming) {
-    const name = upcoming.customers?.full_name?.split(' ')[0] || '?'
-    const [h, m] = upcoming.reservation_time.split(':').map(Number)
+  if (earliest) {
+    const name = earliest.customers?.full_name?.split(' ')[0] || '?'
+    const [h, m] = earliest.reservation_time.split(':').map(Number)
     const ampm = h >= 12 ? 'pm' : 'am'
     const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
     const time = `${hour}:${String(m).padStart(2, '0')}${ampm}`
-    return { line1: name + getReservationIcons(upcoming), line2: time }
+    return { line1: name + getReservationIcons(earliest), line2: time }
   }
 
   return { line1: table.table_number, line2: null }
@@ -86,66 +111,19 @@ function checkTimeConflict(existingReservations, newReservation) {
   return { conflict: false }
 }
 
-const DEFAULT_TABLES = [
-  ...Array.from({ length: 12 }, (_, i) => ({
-    id: `table-${i + 1}`,
-    table_number: `T${i + 1}`,
-    capacity: 2,
-    x_position: 50 + (i % 4) * 55,
-    y_position: 180 + Math.floor(i / 4) * 45,
-    is_bookable: true,
-    rotated: false,
-  })),
-  {
-    id: 'table-big',
-    table_number: 'BT',
-    capacity: 8,
-    x_position: 260,
-    y_position: 180,
-    is_bookable: true,
-    rotated: false,
-  },
-  {
-    id: 'bar-1',
-    table_number: 'Bar 1',
-    capacity: 2,
-    x_position: 85,
-    y_position: 148,
-    is_bookable: true,
-    rotated: false,
-  },
-  {
-    id: 'bar-2',
-    table_number: 'Bar 2',
-    capacity: 2,
-    x_position: 115,
-    y_position: 148,
-    is_bookable: true,
-    rotated: false,
-  },
-  {
-    id: 'bar-3',
-    table_number: 'Bar 3',
-    capacity: 2,
-    x_position: 145,
-    y_position: 148,
-    is_bookable: true,
-    rotated: false,
-  },
-  {
-    id: 'bar-4',
-    table_number: 'Bar 4',
-    capacity: 2,
-    x_position: 175,
-    y_position: 148,
-    is_bookable: true,
-    rotated: false,
-  },
-]
+function formatDisplayDate(dateString) {
+  const [year, month, day] = dateString.split('-').map(Number)
+  const d = new Date(year, month - 1, day)
+  return d.toLocaleDateString('en-MY', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
+const emptyBlockForm = { date: '', start_time: '', end_time: '', reason: '' }
 
 export default function Tables() {
   const [tables, setTables] = useState([])
   const [reservations, setReservations] = useState([])
+  const [statusByTable, setStatusByTable] = useState(new Map())
+  const [selectedDate, setSelectedDate] = useState(getLocalToday())
   const [selected, setSelected] = useState(null)
   const [dragging, setDragging] = useState(null)
   const [saved, setSaved] = useState(false)
@@ -153,22 +131,23 @@ export default function Tables() {
   const [confirmModal, setConfirmModal] = useState(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const [multiSelected, setMultiSelected] = useState([])
+  const [blockFormOpen, setBlockFormOpen] = useState(false)
+  const [blockForm, setBlockForm] = useState(emptyBlockForm)
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
 
-  const today = new Date().toISOString().split('T')[0]
-
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => { fetchAll() }, [selectedDate])
 
   async function fetchAll() {
-    const [{ data: tableData }, { data: resData }] = await Promise.all([
+    const [{ data: tableData }, { data: resData }, statusList] = await Promise.all([
       supabase.from('restaurant_tables').select('*'),
       supabase.from('reservations')
         .select('*')
-        .eq('reservation_date', today)
+        .eq('reservation_date', selectedDate)
         .in('status', ['confirmed', 'pending', 'seated'])
-        .order('reservation_time', { ascending: true })
+        .order('reservation_time', { ascending: true }),
+      getTableStatusForDate(selectedDate)
     ])
 
     const reservationsData = resData || []
@@ -185,6 +164,7 @@ export default function Tables() {
 
     setTables((tableData || []).map(t => ({ ...t, rotated: t.rotated || false })))
     setReservations(reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
+    setStatusByTable(new Map((statusList || []).map(s => [s.table_id, s])))
   }
 
   async function saveTables() {
@@ -212,11 +192,6 @@ export default function Tables() {
     return reservations.filter(r =>
       !r.table_ids || !Array.isArray(r.table_ids) || r.table_ids.length === 0
     )
-  }
-
-  function isTableLocked(table) {
-    if (!table.locked_until) return false
-    return new Date(table.locked_until) > new Date()
   }
 
   function getAssignedCapacity(reservationId) {
@@ -334,6 +309,28 @@ export default function Tables() {
     await fetchAll()
   }
 
+  async function submitBlockForm(e) {
+    e.preventDefault()
+    const { error } = await supabase.from('table_blocks').insert([{
+      table_id: selected,
+      block_date: blockForm.date,
+      start_time: blockForm.start_time || null,
+      end_time: blockForm.end_time || null,
+      reason: blockForm.reason || null,
+      source_type: 'manual'
+    }])
+    if (error) { console.error('Failed to block table:', error); return }
+    setBlockFormOpen(false)
+    setBlockForm(emptyBlockForm)
+    await fetchAll()
+  }
+
+  async function unblockTable(blockId) {
+    const { error } = await supabase.from('table_blocks').delete().eq('id', blockId)
+    if (error) { console.error('Failed to unblock table:', error); return }
+    await fetchAll()
+  }
+
   function getSVGPoint(clientX, clientY) {
     const pt = svgRef.current.createSVGPoint()
     pt.x = clientX
@@ -404,12 +401,15 @@ export default function Tables() {
       )
       return
     }
+    setBlockFormOpen(false)
     setSelected(selected === table.id ? null : table.id)
   }
 
   const selectedTable = tables.find(t => t.id === selected)
+  const selectedStatus = selected ? statusByTable.get(selected) : null
   const selectedTableReservations = selected ? getTableReservations(selected) : []
   const unassigned = getUnassignedReservations()
+  const todayView = isToday(selectedDate)
 
   return (
     <div className="min-h-screen p-4 md:p-6">
@@ -418,11 +418,19 @@ export default function Tables() {
           <h1 className="text-2xl md:text-3xl font-bold">Floor Plan</h1>
           <p className="text-gray-500 text-sm">
             {mode === 'assign'
-              ? `Today — ${new Date().toLocaleDateString('en-MY', { weekday: 'long', day: 'numeric', month: 'long' })}`
+              ? (todayView ? `Today — ${formatDisplayDate(selectedDate)}` : formatDisplayDate(selectedDate))
               : 'Drag tables to reposition'}
           </p>
         </div>
-        <div className="flex gap-2 md:gap-3">
+        <div className="flex gap-2 md:gap-3 items-end">
+          {mode === 'assign' && (
+            <div>
+              <label className="block text-xs tracking-widest uppercase text-gray-400 mb-1">Date</label>
+              <input type="date" value={selectedDate}
+                onChange={e => { setSelected(null); setSelectedDate(e.target.value) }}
+                className="border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors" />
+            </div>
+          )}
           <button onClick={() => { setMode(mode === 'assign' ? 'layout' : 'assign'); setSelected(null); setMultiSelectMode(false); setMultiSelected([]) }}
             className="px-3 md:px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700">
             {mode === 'assign' ? '✏️ Edit Layout' : '← Back'}
@@ -464,8 +472,9 @@ export default function Tables() {
             {tables.map(table => {
               const { w, h } = getTableSize(table)
               const assigned = getTableReservations(table.id)
-              const color = getTableColor(table, assigned)
-              const label = getTableLabel(table, assigned)
+              const status = statusByTable.get(table.id)
+              const color = getTableColor(table, status)
+              const label = getTableLabel(table, assigned, todayView)
               const isSelected = selected === table.id
               const isMultiSelected = multiSelected.includes(table.id)
 
@@ -595,8 +604,8 @@ export default function Tables() {
                 onChange={e => setTables(prev => prev.map(t => t.id === selected ? { ...t, table_number: e.target.value } : t))}
                 className="w-full border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 mb-4" />
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Capacity</p>
-              <input type="number" value={selectedTable.capacity}
-                onChange={e => setTables(prev => prev.map(t => t.id === selected ? { ...t, capacity: parseInt(e.target.value) } : t))}
+              <input type="number" value={selectedTable.capacity ?? ''}
+                onChange={e => setTables(prev => prev.map(t => t.id === selected ? { ...t, capacity: parseInt(e.target.value) || null } : t))}
                 className="w-full border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 mb-4" />
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Status</p>
               <button onClick={() => setTables(prev => prev.map(t => t.id === selected ? { ...t, is_bookable: !t.is_bookable } : t))}
@@ -614,7 +623,7 @@ export default function Tables() {
 
           {mode === 'assign' && !selectedTable && (
             <>
-              <h3 className="font-bold text-base mb-3">Unassigned Today</h3>
+              <h3 className="font-bold text-base mb-3">Unassigned {todayView ? 'Today' : 'This Date'}</h3>
               {unassigned.length === 0 ? (
                 <p className="text-gray-400 text-sm">All reservations are assigned.</p>
               ) : (
@@ -634,9 +643,9 @@ export default function Tables() {
                 <div className="flex flex-col gap-2 text-xs text-gray-500">
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded inline-block" style={{ backgroundColor: '#E8420A' }}></span> Free</span>
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-yellow-600 inline-block"></span> Reserved</span>
-                  <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-green-600 inline-block"></span> Seated</span>
+                  {todayView && <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-green-600 inline-block"></span> Seated</span>}
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-gray-400 inline-block"></span> Blocked</span>
-                  <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-purple-700 inline-block"></span> Locked</span>
+                  {todayView && <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-purple-700 inline-block"></span> Locked</span>}
                   <span className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded inline-block" style={{ backgroundColor: '#1B3A6B' }}></span>
                     Big Table
@@ -654,7 +663,73 @@ export default function Tables() {
             <>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-base">{selectedTable.table_number}</h3>
-                <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-black text-sm">✕ Close</button>
+                <button onClick={() => { setSelected(null); setBlockFormOpen(false) }} className="text-gray-400 hover:text-black text-sm">✕ Close</button>
+              </div>
+
+              <div className="mb-4 p-3 rounded-lg border border-gray-200">
+                {selectedStatus?.status === 'blocked' && selectedStatus.block_id ? (
+                  <>
+                    <p className="text-xs text-gray-500 mb-2">
+                      Blocked{selectedStatus.reason ? `: ${selectedStatus.reason}` : ''}
+                      {selectedStatus.source_type === 'experience'
+                        ? ' — assigned from an Experience. Prefer unassigning from the Experiences page.'
+                        : ''}
+                    </p>
+                    <button onClick={() => unblockTable(selectedStatus.block_id)}
+                      className="w-full py-2 text-xs font-medium tracking-widest uppercase border border-gray-300 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
+                      Unblock
+                    </button>
+                  </>
+                ) : selectedStatus?.status === 'blocked' ? (
+                  <p className="text-xs text-gray-500">This table is marked not bookable. Change that from Edit Layout.</p>
+                ) : blockFormOpen ? (
+                  <form onSubmit={submitBlockForm} className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Date</label>
+                      <input type="date" required value={blockForm.date}
+                        onChange={e => setBlockForm(f => ({ ...f, date: e.target.value }))}
+                        className="w-full border-b border-gray-200 bg-transparent py-1.5 text-sm focus:outline-none focus:border-gray-800" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Start (optional)</label>
+                        <input type="time" value={blockForm.start_time}
+                          onChange={e => setBlockForm(f => ({ ...f, start_time: e.target.value }))}
+                          className="w-full border-b border-gray-200 bg-transparent py-1.5 text-sm focus:outline-none focus:border-gray-800" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">End (optional)</label>
+                        <input type="time" value={blockForm.end_time}
+                          onChange={e => setBlockForm(f => ({ ...f, end_time: e.target.value }))}
+                          className="w-full border-b border-gray-200 bg-transparent py-1.5 text-sm focus:outline-none focus:border-gray-800" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Reason (optional)</label>
+                      <input type="text" value={blockForm.reason}
+                        onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))}
+                        placeholder="e.g. Deep clean"
+                        className="w-full border-b border-gray-200 bg-transparent py-1.5 text-sm focus:outline-none focus:border-gray-800" />
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="submit"
+                        className="flex-1 py-2 text-xs font-medium tracking-widest uppercase text-white rounded-lg"
+                        style={{ backgroundColor: '#E8420A' }}>
+                        Block
+                      </button>
+                      <button type="button" onClick={() => setBlockFormOpen(false)}
+                        className="flex-1 py-2 text-xs font-medium tracking-widest uppercase border border-gray-300 text-gray-600 rounded-lg">
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => { setBlockForm({ date: selectedDate, start_time: '', end_time: '', reason: '' }); setBlockFormOpen(true) }}
+                    className="w-full py-2 text-xs font-medium tracking-widest uppercase border border-gray-300 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
+                    Block This Table
+                  </button>
+                )}
               </div>
 
               {selectedTableReservations.length > 0 && (
@@ -695,7 +770,7 @@ export default function Tables() {
 
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Assign a Reservation</p>
               {unassigned.length === 0 ? (
-                <p className="text-gray-400 text-sm">No unassigned reservations today.</p>
+                <p className="text-gray-400 text-sm">No unassigned reservations {todayView ? 'today' : 'on this date'}.</p>
               ) : (
                 unassigned.map(r => (
                   <div key={r.id}

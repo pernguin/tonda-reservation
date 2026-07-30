@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
+import { getTableStatusForDate } from '../../lib/tableAvailability'
 
 const BRAND = '#8B1A1A'
 
@@ -13,6 +14,7 @@ const emptyForm = {
 export default function Experiences() {
   const [experiences, setExperiences] = useState([])
   const [registrationCounts, setRegistrationCounts] = useState({})
+  const [restaurantTables, setRestaurantTables] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
@@ -21,6 +23,8 @@ export default function Experiences() {
   const [saving, setSaving] = useState(false)
   const [viewingRegs, setViewingRegs] = useState(null)
   const [registrations, setRegistrations] = useState([])
+  const [tableStatus, setTableStatus] = useState([])
+  const [assigningFor, setAssigningFor] = useState(null)
   const [posterError, setPosterError] = useState(null)
   const [posterFileName, setPosterFileName] = useState(null)
   const posterInputRef = useRef(null)
@@ -31,12 +35,16 @@ export default function Experiences() {
 
   async function fetchAll() {
     setLoading(true)
-    const { data: exps } = await supabase.from('experiences').select('*').order('date', { ascending: true })
-    const { data: regs } = await supabase.from('experience_registrations').select('experience_id')
+    const [{ data: exps }, { data: regs }, { data: tables }] = await Promise.all([
+      supabase.from('experiences').select('*').order('date', { ascending: true }),
+      supabase.from('experience_registrations').select('experience_id'),
+      supabase.from('restaurant_tables').select('id, table_number')
+    ])
     const counts = {}
     ;(regs || []).forEach(r => { counts[r.experience_id] = (counts[r.experience_id] || 0) + 1 })
     setExperiences(exps || [])
     setRegistrationCounts(counts)
+    setRestaurantTables(tables || [])
     setLoading(false)
   }
 
@@ -127,13 +135,51 @@ export default function Experiences() {
   async function openRegistrations(exp) {
     setShowForm(false)
     setViewingRegs(exp)
+    setAssigningFor(null)
     const { data } = await supabase
       .from('experience_registrations')
       .select('*')
       .eq('experience_id', exp.id)
       .order('created_at', { ascending: false })
     setRegistrations(data || [])
+    const statusList = await getTableStatusForDate(exp.date)
+    setTableStatus(statusList)
   }
+
+  async function refreshTableStatus() {
+    if (!viewingRegs) return
+    const statusList = await getTableStatusForDate(viewingRegs.date)
+    setTableStatus(statusList)
+  }
+
+  async function assignTableToRegistration(registrationId, tableId) {
+    const { error } = await supabase.from('table_blocks').insert([{
+      table_id: tableId,
+      block_date: viewingRegs.date,
+      start_time: viewingRegs.time,
+      end_time: null,
+      reason: viewingRegs.name,
+      source_type: 'experience',
+      source_id: registrationId
+    }])
+    if (error) { console.error('Failed to assign table:', error); return }
+    setAssigningFor(null)
+    await refreshTableStatus()
+  }
+
+  async function unassignTableBlock(blockId) {
+    const { error } = await supabase.from('table_blocks').delete().eq('id', blockId)
+    if (error) { console.error('Failed to unassign table:', error); return }
+    await refreshTableStatus()
+  }
+
+  const tablesById = new Map(restaurantTables.map(t => [t.id, t]))
+
+  function getAssignedTables(registrationId) {
+    return tableStatus.filter(s => s.source_type === 'experience' && s.source_id === registrationId)
+  }
+
+  const freeTablesForDate = tableStatus.filter(s => s.status === 'free')
 
   const today = new Date().toISOString().split('T')[0]
   const upcoming = experiences.filter(e => e.date >= today)
@@ -281,6 +327,7 @@ export default function Experiences() {
             <div>
               <p className="text-xs tracking-widest uppercase text-gray-400 mb-1">Registrations</p>
               <h2 className="text-lg font-medium text-gray-900">{viewingRegs.name}</h2>
+              <p className="text-xs text-gray-400">{viewingRegs.date} · {viewingRegs.time?.slice(0, 5)}</p>
             </div>
             <button onClick={() => setViewingRegs(null)}
               className="text-xs tracking-widest uppercase text-gray-400 hover:text-gray-600 transition-colors">
@@ -297,19 +344,55 @@ export default function Experiences() {
                 <div className="w-12 text-xs tracking-widest uppercase text-gray-400 text-right">Pax</div>
                 <div className="w-28 text-xs tracking-widest uppercase text-gray-400 text-right">Registered</div>
               </div>
-              {registrations.map(r => (
-                <div key={r.id} className="border-b border-gray-100 py-2">
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1 min-w-0 text-sm text-gray-900 truncate">{r.name}</div>
-                    <div className="w-32 text-xs text-gray-500">{r.phone}</div>
-                    <div className="w-12 text-xs text-gray-500 text-right">{r.pax}</div>
-                    <div className="w-28 text-xs text-gray-400 text-right">
-                      {new Date(r.created_at).toLocaleDateString()}
+              {registrations.map(r => {
+                const assignedTables = getAssignedTables(r.id)
+                return (
+                  <div key={r.id} className="border-b border-gray-100 py-2">
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 min-w-0 text-sm text-gray-900 truncate">{r.name}</div>
+                      <div className="w-32 text-xs text-gray-500">{r.phone}</div>
+                      <div className="w-12 text-xs text-gray-500 text-right">{r.pax}</div>
+                      <div className="w-28 text-xs text-gray-400 text-right">
+                        {new Date(r.created_at).toLocaleDateString()}
+                      </div>
                     </div>
+                    {r.notes && <p className="text-xs text-gray-500 mt-1">📝 {r.notes}</p>}
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {assignedTables.map(s => (
+                        <span key={s.block_id}
+                          className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded-full">
+                          {tablesById.get(s.table_id)?.table_number || 'Table'}
+                          <button onClick={() => unassignTableBlock(s.block_id)}
+                            className="text-gray-400 hover:text-red-600">✕</button>
+                        </span>
+                      ))}
+                      <button onClick={() => setAssigningFor(assigningFor === r.id ? null : r.id)}
+                        className="text-xs font-medium tracking-wide text-blue-600 hover:text-blue-800 transition-colors">
+                        {assigningFor === r.id ? 'Cancel' : '+ Assign Table'}
+                      </button>
+                    </div>
+
+                    {assigningFor === r.id && (
+                      <div className="mt-2 p-3 bg-gray-50 rounded-lg">
+                        {freeTablesForDate.length === 0 ? (
+                          <p className="text-xs text-gray-400">No free tables on this date.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {freeTablesForDate.map(s => (
+                              <button key={s.table_id}
+                                onClick={() => assignTableToRegistration(r.id, s.table_id)}
+                                className="text-xs px-3 py-1.5 rounded-full border border-gray-300 hover:border-black hover:bg-white transition-colors">
+                                {tablesById.get(s.table_id)?.table_number || 'Table'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  {r.notes && <p className="text-xs text-gray-500 mt-1">📝 {r.notes}</p>}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

@@ -154,12 +154,14 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
     const [resH, resM] = reservationTime.split(':').map(Number)
     const resMins = resH * 60 + resM
     const resEnd = resMins + 120
+    const reservationDateTime = new Date(`${reservationDate}T${reservationTime}`)
 
+    // Filter out locked tables (locked within 2 hours of reservation time).
+    // Compare as full datetimes, not just hour:minute — a lock from a
+    // different day must not read as active at the same clock time today.
     const availableTables = allTables.filter(table => {
       if (!table.locked_until) return true
-      const lockedUntil = new Date(table.locked_until)
-      const lockedUntilMins = lockedUntil.getHours() * 60 + lockedUntil.getMinutes()
-      return lockedUntilMins <= resMins
+      return new Date(table.locked_until) <= reservationDateTime
     })
 
     const { data: existingReservations } = await supabase

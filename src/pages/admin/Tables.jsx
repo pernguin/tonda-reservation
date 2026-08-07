@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
-import { getTableStatusForDate, getLocalToday, isToday } from '../../lib/tableAvailability'
+import { computeTableStatus, getLocalToday, isToday } from '../../lib/tableAvailability'
+
+const DATE_DEBOUNCE_MS = 300
 
 const FLOOR_POINTS = [
   [30, 80], [30, 320], [370, 320], [370, 30],
@@ -123,6 +125,7 @@ export default function Tables() {
   const [tables, setTables] = useState([])
   const [reservations, setReservations] = useState([])
   const [statusByTable, setStatusByTable] = useState(new Map())
+  const [dateInputValue, setDateInputValue] = useState(getLocalToday())
   const [selectedDate, setSelectedDate] = useState(getLocalToday())
   const [selected, setSelected] = useState(null)
   const [dragging, setDragging] = useState(null)
@@ -136,18 +139,41 @@ export default function Tables() {
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
+  const dateDebounceRef = useRef(null)
+  const requestIdRef = useRef(0)
 
   useEffect(() => { fetchAll() }, [selectedDate])
 
+  // Clear any pending debounce on unmount so it doesn't fire after teardown.
+  useEffect(() => () => {
+    if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current)
+  }, [])
+
+  function handleDateInputChange(value) {
+    setSelected(null)
+    setDateInputValue(value)
+    // A native date input fires onChange once per completed segment (month/
+    // day/year), not just once when the whole date is finished — editing an
+    // already-populated date can produce several valid intermediate dates in
+    // quick succession. Debounce so only the settled value triggers a fetch.
+    if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current)
+    dateDebounceRef.current = setTimeout(() => {
+      setSelectedDate(value)
+    }, DATE_DEBOUNCE_MS)
+  }
+
   async function fetchAll() {
-    const [{ data: tableData }, { data: resData }, statusList] = await Promise.all([
+    const requestId = ++requestIdRef.current
+    const [{ data: tableData }, { data: resData }, { data: blockData }] = await Promise.all([
       supabase.from('restaurant_tables').select('*'),
       supabase.from('reservations')
         .select('*')
         .eq('reservation_date', selectedDate)
         .in('status', ['confirmed', 'pending', 'seated'])
         .order('reservation_time', { ascending: true }),
-      getTableStatusForDate(selectedDate)
+      supabase.from('table_blocks')
+        .select('id, table_id, reason, source_type, source_id')
+        .eq('block_date', selectedDate)
     ])
 
     const reservationsData = resData || []
@@ -162,9 +188,22 @@ export default function Tables() {
       customersById = Object.fromEntries((customersData || []).map(c => [c.id, c]))
     }
 
-    setTables((tableData || []).map(t => ({ ...t, rotated: t.rotated || false })))
-    setReservations(reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
-    setStatusByTable(new Map((statusList || []).map(s => [s.table_id, s])))
+    // A newer fetchAll() may have started (and possibly already resolved)
+    // while this one was in flight -- discard this response rather than
+    // clobber more recent state with stale data.
+    if (requestId !== requestIdRef.current) return
+
+    const tableRows = (tableData || []).map(t => ({ ...t, rotated: t.rotated || false }))
+    const reservationRows = reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] }))
+    setTables(tableRows)
+    setReservations(reservationRows)
+    const statusList = computeTableStatus({
+      dateString: selectedDate,
+      tables: tableRows,
+      reservations: reservationRows,
+      blocks: blockData || []
+    })
+    setStatusByTable(new Map(statusList.map(s => [s.table_id, s])))
   }
 
   async function saveTables() {
@@ -426,8 +465,8 @@ export default function Tables() {
           {mode === 'assign' && (
             <div>
               <label className="block text-xs tracking-widest uppercase text-gray-400 mb-1">Date</label>
-              <input type="date" value={selectedDate}
-                onChange={e => { setSelected(null); setSelectedDate(e.target.value) }}
+              <input type="date" value={dateInputValue}
+                onChange={e => handleDateInputChange(e.target.value)}
                 className="border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors" />
             </div>
           )}

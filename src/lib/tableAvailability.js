@@ -25,24 +25,16 @@ function statusRecord(tableId, status, block) {
   }
 }
 
-// Computes each table's Free/Reserved/Blocked/Seated/Locked status for a given
-// date. Shared by the admin floor plan (date picker) and the Experiences page
-// (table assignment) so the two views can never drift apart.
-export async function getTableStatusForDate(dateString) {
+// Pure, synchronous: computes each table's Free/Reserved/Blocked/Seated/Locked
+// status for `dateString` from already-fetched data. Callers that already have
+// tables/reservations/blocks on hand for other reasons (e.g. Tables.jsx, which
+// needs the broader row shapes for its own UI anyway) should call this
+// directly instead of getTableStatusForDate() below, to avoid fetching the
+// same rows twice. `tables` need at least {id, is_bookable, locked_until};
+// `reservations` need at least {table_ids, status}; `blocks` need at least
+// {id, table_id, reason, source_type, source_id}.
+export function computeTableStatus({ dateString, tables, reservations, blocks }) {
   const today = isToday(dateString)
-
-  const [{ data: tables }, { data: reservations }, { data: blocks }] = await Promise.all([
-    supabase.from('restaurant_tables').select('id, is_bookable, locked_until'),
-    supabase
-      .from('reservations')
-      .select('id, table_ids, status')
-      .eq('reservation_date', dateString)
-      .in('status', ACTIVE_RESERVATION_STATUSES),
-    supabase
-      .from('table_blocks')
-      .select('id, table_id, reason, source_type, source_id')
-      .eq('block_date', dateString)
-  ])
 
   const reservationsByTable = new Map()
   for (const r of reservations || []) {
@@ -83,4 +75,26 @@ export async function getTableStatusForDate(dateString) {
     if (assigned.length > 0) return statusRecord(table.id, 'reserved', null)
     return statusRecord(table.id, 'free', null)
   })
+}
+
+// Fetches tables/reservations/blocks itself, then delegates to
+// computeTableStatus(). Use this when the caller doesn't already have that
+// data on hand for `dateString` (e.g. Experiences.jsx, which computes status
+// across several dates in an experience's span with no other state backing
+// any of them).
+export async function getTableStatusForDate(dateString) {
+  const [{ data: tables }, { data: reservations }, { data: blocks }] = await Promise.all([
+    supabase.from('restaurant_tables').select('id, is_bookable, locked_until'),
+    supabase
+      .from('reservations')
+      .select('id, table_ids, status')
+      .eq('reservation_date', dateString)
+      .in('status', ACTIVE_RESERVATION_STATUSES),
+    supabase
+      .from('table_blocks')
+      .select('id, table_id, reason, source_type, source_id')
+      .eq('block_date', dateString)
+  ])
+
+  return computeTableStatus({ dateString, tables, reservations, blocks })
 }

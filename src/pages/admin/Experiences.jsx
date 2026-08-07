@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
-import { getTableStatusForDate } from '../../lib/tableAvailability'
+import { getTableStatusForDate, getLocalToday } from '../../lib/tableAvailability'
+import { generateSeriesDates, dateRange } from '../../lib/experienceSeries'
 
 const BRAND = '#8B1A1A'
 
@@ -8,7 +9,38 @@ const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm 
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
 
 const emptyForm = {
-  name: '', date: '', time: '', description: '', price: '', poster_url: '', status: 'draft'
+  name: '', date: '', time: '', end_date: '', end_time: '',
+  description: '', price: '', poster_url: '', status: 'draft',
+  recurring: false, cadence: 'weekly', interval: '1', occurrences: ''
+}
+
+function buildBlockRows(exp, tableId, registrationId) {
+  const dates = exp.end_date && exp.end_date !== exp.date ? dateRange(exp.date, exp.end_date) : [exp.date]
+  return dates.map((d, i) => {
+    const isFirst = i === 0
+    const isLast = i === dates.length - 1
+    let start_time = null
+    let end_time = null
+    if (dates.length === 1) {
+      start_time = exp.time
+      end_time = exp.end_time || null
+    } else if (isFirst) {
+      start_time = exp.time
+      end_time = null
+    } else if (isLast) {
+      start_time = null
+      end_time = exp.end_time || null
+    }
+    return {
+      table_id: tableId,
+      block_date: d,
+      start_time,
+      end_time,
+      reason: exp.name,
+      source_type: 'experience',
+      source_id: registrationId
+    }
+  })
 }
 
 export default function Experiences() {
@@ -21,9 +53,11 @@ export default function Experiences() {
   const [form, setForm] = useState(emptyForm)
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [seriesNotice, setSeriesNotice] = useState(null)
   const [viewingRegs, setViewingRegs] = useState(null)
   const [registrations, setRegistrations] = useState([])
   const [tableStatus, setTableStatus] = useState([])
+  const [spanFreeTableIds, setSpanFreeTableIds] = useState(new Set())
   const [assigningFor, setAssigningFor] = useState(null)
   const [posterError, setPosterError] = useState(null)
   const [posterFileName, setPosterFileName] = useState(null)
@@ -49,8 +83,8 @@ export default function Experiences() {
   }
 
   function handleChange(e) {
-    const { name, value } = e.target
-    setForm(prev => ({ ...prev, [name]: value }))
+    const { name, value, type, checked } = e.target
+    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
   }
 
   async function handlePosterUpload(e) {
@@ -92,10 +126,13 @@ export default function Experiences() {
       name: exp.name,
       date: exp.date,
       time: exp.time?.slice(0, 5) || '',
+      end_date: exp.end_date || '',
+      end_time: exp.end_time?.slice(0, 5) || '',
       description: exp.description || '',
       price: exp.price ?? '',
       poster_url: exp.poster_url || '',
-      status: exp.status
+      status: exp.status,
+      recurring: false, cadence: 'weekly', interval: '1', occurrences: ''
     })
     setEditingId(exp.id)
     setShowForm(true)
@@ -107,20 +144,58 @@ export default function Experiences() {
   async function handleSave(e) {
     e.preventDefault()
     setSaving(true)
-    const payload = {
+    setSeriesNotice(null)
+
+    const basePayload = {
       name: form.name,
-      date: form.date,
       time: form.time,
+      end_time: form.end_time || null,
       description: form.description || null,
       price: form.price === '' ? null : parseFloat(form.price),
       poster_url: form.poster_url || null,
       status: form.status
     }
+
     if (editingId) {
-      await supabase.from('experiences').update(payload).eq('id', editingId)
+      await supabase.from('experiences').update({
+        ...basePayload,
+        date: form.date,
+        end_date: form.end_date || null
+      }).eq('id', editingId)
+    } else if (form.recurring) {
+      const { dates, skipped } = generateSeriesDates({
+        startDate: form.date,
+        endDate: form.end_date || null,
+        cadence: form.cadence,
+        interval: parseInt(form.interval) || 1,
+        occurrences: parseInt(form.occurrences) || 1
+      })
+      const seriesId = crypto.randomUUID()
+      const rows = dates.map(d => ({
+        ...basePayload,
+        date: d.date,
+        end_date: d.endDate,
+        series_id: seriesId
+      }))
+      const { error } = await supabase.from('experiences').insert(rows)
+      if (error) {
+        console.error('Failed to create series:', error)
+        setSeriesNotice(`Failed to create series: ${error.message}`)
+      } else {
+        let notice = `Created ${rows.length} experience${rows.length > 1 ? 's' : ''} in this series.`
+        if (skipped.length > 0) {
+          notice += ` ${skipped.length} occurrence${skipped.length > 1 ? 's were' : ' was'} skipped: ${skipped.join('; ')}.`
+        }
+        setSeriesNotice(notice)
+      }
     } else {
-      await supabase.from('experiences').insert([payload])
+      await supabase.from('experiences').insert([{
+        ...basePayload,
+        date: form.date,
+        end_date: form.end_date || null
+      }])
     }
+
     setSaving(false)
     setShowForm(false)
     fetchAll()
@@ -128,8 +203,60 @@ export default function Experiences() {
 
   async function handleDelete(id) {
     if (!confirm('Delete this experience? This will also delete its registrations.')) return
+    const { data: regs } = await supabase.from('experience_registrations').select('id').eq('experience_id', id)
+    const regIds = (regs || []).map(r => r.id)
+    if (regIds.length > 0) {
+      await supabase.from('table_blocks').delete().eq('source_type', 'experience').in('source_id', regIds)
+    }
     await supabase.from('experiences').delete().eq('id', id)
     fetchAll()
+  }
+
+  async function deleteRemainingOccurrences(seriesId) {
+    const today = getLocalToday()
+    const { data: futureExps } = await supabase
+      .from('experiences')
+      .select('id')
+      .eq('series_id', seriesId)
+      .gte('date', today)
+    const expIds = (futureExps || []).map(e => e.id)
+    if (expIds.length === 0) { alert('No future occurrences to delete.'); return }
+
+    const { data: regs } = await supabase
+      .from('experience_registrations')
+      .select('id, experience_id')
+      .in('experience_id', expIds)
+    const regIds = (regs || []).map(r => r.id)
+    const occurrencesWithRegs = new Set((regs || []).map(r => r.experience_id)).size
+
+    let message = `Delete ${expIds.length} remaining occurrence${expIds.length > 1 ? 's' : ''} in this series?`
+    if (occurrencesWithRegs > 0) {
+      message += ` ${occurrencesWithRegs} of these occurrences have registrations — deleting will remove those too.`
+    }
+    if (!confirm(message)) return
+
+    if (regIds.length > 0) {
+      await supabase.from('table_blocks').delete().eq('source_type', 'experience').in('source_id', regIds)
+    }
+    await supabase.from('experiences').delete().in('id', expIds)
+    setViewingRegs(null)
+    fetchAll()
+  }
+
+  async function computeSpanFreeTableIds(exp) {
+    const dates = exp.end_date && exp.end_date !== exp.date ? dateRange(exp.date, exp.end_date) : [exp.date]
+    const statusLists = await Promise.all(dates.map(d => getTableStatusForDate(d)))
+    if (statusLists.length === 0 || !statusLists[0]) return new Set()
+    const freeSets = statusLists.map(list => new Set(list.filter(s => s.status === 'free').map(s => s.table_id)))
+    const allIds = statusLists[0].map(s => s.table_id)
+    return new Set(allIds.filter(id => freeSets.every(set => set.has(id))))
+  }
+
+  async function loadTableDataFor(exp) {
+    const statusList = await getTableStatusForDate(exp.date)
+    setTableStatus(statusList)
+    const freeIds = await computeSpanFreeTableIds(exp)
+    setSpanFreeTableIds(freeIds)
   }
 
   async function openRegistrations(exp) {
@@ -142,33 +269,29 @@ export default function Experiences() {
       .eq('experience_id', exp.id)
       .order('created_at', { ascending: false })
     setRegistrations(data || [])
-    const statusList = await getTableStatusForDate(exp.date)
-    setTableStatus(statusList)
+    await loadTableDataFor(exp)
   }
 
   async function refreshTableStatus() {
     if (!viewingRegs) return
-    const statusList = await getTableStatusForDate(viewingRegs.date)
-    setTableStatus(statusList)
+    await loadTableDataFor(viewingRegs)
   }
 
   async function assignTableToRegistration(registrationId, tableId) {
-    const { error } = await supabase.from('table_blocks').insert([{
-      table_id: tableId,
-      block_date: viewingRegs.date,
-      start_time: viewingRegs.time,
-      end_time: null,
-      reason: viewingRegs.name,
-      source_type: 'experience',
-      source_id: registrationId
-    }])
+    const rows = buildBlockRows(viewingRegs, tableId, registrationId)
+    const { error } = await supabase.from('table_blocks').insert(rows)
     if (error) { console.error('Failed to assign table:', error); return }
     setAssigningFor(null)
     await refreshTableStatus()
   }
 
-  async function unassignTableBlock(blockId) {
-    const { error } = await supabase.from('table_blocks').delete().eq('id', blockId)
+  async function unassignTableBlock(registrationId, tableId) {
+    const { error } = await supabase
+      .from('table_blocks')
+      .delete()
+      .eq('source_type', 'experience')
+      .eq('source_id', registrationId)
+      .eq('table_id', tableId)
     if (error) { console.error('Failed to unassign table:', error); return }
     await refreshTableStatus()
   }
@@ -179,14 +302,19 @@ export default function Experiences() {
     return tableStatus.filter(s => s.source_type === 'experience' && s.source_id === registrationId)
   }
 
-  const freeTablesForDate = tableStatus.filter(s => s.status === 'free')
+  const freeTablesForDate = tableStatus.filter(s => spanFreeTableIds.has(s.table_id))
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = getLocalToday()
   const upcoming = experiences.filter(e => e.date >= today)
   const past = experiences.filter(e => e.date < today)
 
   function formatPrice(price) {
     return price == null ? 'Free' : `RM ${Number(price).toFixed(2)}`
+  }
+
+  function formatDateRange(exp) {
+    if (exp.end_date && exp.end_date !== exp.date) return `${exp.date} – ${exp.end_date}`
+    return exp.date
   }
 
   function StatusBadge({ status }) {
@@ -209,17 +337,28 @@ export default function Experiences() {
         </div>
         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openRegistrations(exp)}>
           <p className="text-sm font-medium text-gray-900 truncate">{exp.name}</p>
-          <p className="text-xs text-gray-400">{exp.date} · {exp.time?.slice(0, 5)} · {formatPrice(exp.price)}</p>
+          <p className="text-xs text-gray-400">{formatDateRange(exp)} · {exp.time?.slice(0, 5)} · {formatPrice(exp.price)}</p>
         </div>
         <div className="text-xs text-gray-500 shrink-0 cursor-pointer" onClick={() => openRegistrations(exp)}>
           {registrationCounts[exp.id] || 0} registered
         </div>
-        <div className="shrink-0"><StatusBadge status={exp.status} /></div>
+        <div className="shrink-0 flex items-center gap-2">
+          {exp.series_id && (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700">Part of a series</span>
+          )}
+          <StatusBadge status={exp.status} />
+        </div>
         <div className="flex gap-3 shrink-0">
           <button onClick={() => openEditForm(exp)}
             className="text-xs font-medium tracking-wide text-blue-600 hover:text-blue-800 transition-colors">
             Edit
           </button>
+          {exp.series_id && (
+            <button onClick={() => deleteRemainingOccurrences(exp.series_id)}
+              className="text-xs font-medium tracking-wide text-purple-600 hover:text-purple-800 transition-colors">
+              Delete Series
+            </button>
+          )}
           <button onClick={() => handleDelete(exp.id)}
             className="text-xs font-medium tracking-wide text-red-400 hover:text-red-600 transition-colors">
             Delete
@@ -243,6 +382,16 @@ export default function Experiences() {
         </button>
       </div>
 
+      {seriesNotice && (
+        <div className="border-l-2 pl-4 mb-8 py-2 flex justify-between items-start gap-4" style={{ borderColor: BRAND }}>
+          <p className="text-sm text-gray-700">{seriesNotice}</p>
+          <button onClick={() => setSeriesNotice(null)}
+            className="text-xs tracking-widest uppercase text-gray-400 hover:text-gray-600 transition-colors shrink-0">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {showForm && (
         <form onSubmit={handleSave} className="border border-gray-200 rounded-xl p-6 mb-8 space-y-6">
           <h2 className="text-lg font-medium text-gray-900">{editingId ? 'Edit Experience' : 'New Experience'}</h2>
@@ -263,6 +412,20 @@ export default function Experiences() {
             <div>
               <label className={labelClass}>Time *</label>
               <input name="time" type="time" value={form.time} onChange={handleChange} required
+                className={inputClass} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <label className={labelClass}>End Date (optional)</label>
+              <input name="end_date" type="date" value={form.end_date} onChange={handleChange}
+                min={form.date || undefined}
+                className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>End Time (optional)</label>
+              <input name="end_time" type="time" value={form.end_time} onChange={handleChange}
                 className={inputClass} />
             </div>
           </div>
@@ -307,6 +470,38 @@ export default function Experiences() {
             )}
           </div>
 
+          {!editingId && (
+            <div className="border-t border-gray-100 pt-6">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer mb-4">
+                <input type="checkbox" name="recurring" checked={form.recurring} onChange={handleChange}
+                  className="w-4 h-4" />
+                Make this a recurring series
+              </label>
+              {form.recurring && (
+                <div className="grid grid-cols-3 gap-6">
+                  <div>
+                    <label className={labelClass}>Cadence</label>
+                    <select name="cadence" value={form.cadence} onChange={handleChange} className={inputClass}>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Every N {form.cadence === 'weekly' ? 'week(s)' : 'month(s)'}</label>
+                    <input name="interval" type="number" min="1" value={form.interval} onChange={handleChange}
+                      className={inputClass} />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Number of Occurrences</label>
+                    <input name="occurrences" type="number" min="1" value={form.occurrences} onChange={handleChange}
+                      required={form.recurring}
+                      className={inputClass} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-4">
             <button type="submit" disabled={saving || uploading}
               className="px-8 py-3 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
@@ -327,7 +522,7 @@ export default function Experiences() {
             <div>
               <p className="text-xs tracking-widest uppercase text-gray-400 mb-1">Registrations</p>
               <h2 className="text-lg font-medium text-gray-900">{viewingRegs.name}</h2>
-              <p className="text-xs text-gray-400">{viewingRegs.date} · {viewingRegs.time?.slice(0, 5)}</p>
+              <p className="text-xs text-gray-400">{formatDateRange(viewingRegs)} · {viewingRegs.time?.slice(0, 5)}</p>
             </div>
             <button onClick={() => setViewingRegs(null)}
               className="text-xs tracking-widest uppercase text-gray-400 hover:text-gray-600 transition-colors">
@@ -360,10 +555,10 @@ export default function Experiences() {
 
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       {assignedTables.map(s => (
-                        <span key={s.block_id}
+                        <span key={s.table_id}
                           className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded-full">
                           {tablesById.get(s.table_id)?.table_number || 'Table'}
-                          <button onClick={() => unassignTableBlock(s.block_id)}
+                          <button onClick={() => unassignTableBlock(r.id, s.table_id)}
                             className="text-gray-400 hover:text-red-600">✕</button>
                         </span>
                       ))}
@@ -376,7 +571,7 @@ export default function Experiences() {
                     {assigningFor === r.id && (
                       <div className="mt-2 p-3 bg-gray-50 rounded-lg">
                         {freeTablesForDate.length === 0 ? (
-                          <p className="text-xs text-gray-400">No free tables on this date.</p>
+                          <p className="text-xs text-gray-400">No free tables for these dates.</p>
                         ) : (
                           <div className="flex flex-wrap gap-2">
                             {freeTablesForDate.map(s => (

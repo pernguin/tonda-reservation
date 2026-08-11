@@ -24,3 +24,6 @@ supabase/.temp
 *.njsproj
 *.sln
 *.sw?
+
+# Local Claude Code dev-server config
+.claude/

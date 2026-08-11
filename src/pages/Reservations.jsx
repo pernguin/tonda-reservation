@@ -56,9 +56,9 @@ function getTablesNeeded(guestCount) {
   return { count: 0, type: 'none' }
 }
 
-async function checkAvailability(date, time, guestCount) {
+async function checkAvailability(date, time, guestCount, durationMinutes) {
   const bookingStart = new Date(`${date}T${time}`)
-  const bookingEnd = new Date(bookingStart.getTime() + 2 * 60 * 60 * 1000)
+  const bookingEnd = new Date(bookingStart.getTime() + durationMinutes * 60 * 1000)
 
   const { data: existing } = await supabase
     .from('reservations')
@@ -71,7 +71,7 @@ async function checkAvailability(date, time, guestCount) {
 
   for (const booking of existing || []) {
     const existStart = new Date(`${booking.reservation_date}T${booking.reservation_time}`)
-    const existEnd = new Date(existStart.getTime() + 2 * 60 * 60 * 1000)
+    const existEnd = new Date(existStart.getTime() + durationMinutes * 60 * 1000)
     const overlaps = bookingStart < existEnd && bookingEnd > existStart
     if (overlaps) {
       if (booking.table_type === 'big') bigTableBooked = true
@@ -142,7 +142,7 @@ function getFixedSlots(sessions) {
   })
 }
 
-async function autoAssignTables(reservationId, reservationDate, reservationTime, guestCount) {
+async function autoAssignTables(reservationId, reservationDate, reservationTime, guestCount, durationMinutes) {
   try {
     const { data: allTables } = await supabase
       .from('restaurant_tables')
@@ -153,7 +153,7 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
 
     const [resH, resM] = reservationTime.split(':').map(Number)
     const resMins = resH * 60 + resM
-    const resEnd = resMins + 120
+    const resEnd = resMins + durationMinutes
     const reservationDateTime = new Date(`${reservationDate}T${reservationTime}`)
 
     // Filter out locked tables (locked within 2 hours of reservation time).
@@ -175,7 +175,7 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
     for (const r of existingReservations || []) {
       const [h, m] = r.reservation_time.split(':').map(Number)
       const existStart = h * 60 + m
-      const existEnd = existStart + 120
+      const existEnd = existStart + durationMinutes
       const overlaps = resMins < existEnd && resEnd > existStart
       if (overlaps && Array.isArray(r.table_ids)) {
         r.table_ids.forEach(id => conflictingTableIds.add(id))
@@ -193,7 +193,7 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
     if (singleTable) {
       const lockFrom = new Date()
       lockFrom.setHours(resH, resM, 0, 0)
-      const lockUntil = new Date(lockFrom.getTime() + 2 * 60 * 60 * 1000)
+      const lockUntil = new Date(lockFrom.getTime() + durationMinutes * 60 * 1000)
       await supabase.from('reservations').update({ table_ids: [singleTable.id] }).eq('id', reservationId)
       await supabase.from('restaurant_tables').update({
         locked_until: lockUntil.toISOString(),
@@ -234,7 +234,7 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
         const tableIds = bestCombo.map(t => t.id)
         const lockFrom = new Date()
         lockFrom.setHours(resH, resM, 0, 0)
-        const lockUntil = new Date(lockFrom.getTime() + 2 * 60 * 60 * 1000)
+        const lockUntil = new Date(lockFrom.getTime() + durationMinutes * 60 * 1000)
         await supabase.from('reservations').update({ table_ids: tableIds }).eq('id', reservationId)
         await supabase.from('restaurant_tables').update({
           locked_until: lockUntil.toISOString(),
@@ -370,6 +370,7 @@ export default function Reservations() {
       }
 
       const { slotRule, operatingHours } = info
+      const durationMinutes = slotRule?.hold_duration_minutes ?? 120
       if (slotRule?.rule_type === 'session') {
         const validStarts = (slotRule.sessions || []).map(s => s.start)
         if (!validStarts.includes(form.reservation_time)) {
@@ -381,7 +382,7 @@ export default function Reservations() {
         }
       }
 
-      const availability = await checkAvailability(form.reservation_date, form.reservation_time, parseInt(form.guest_count))
+      const availability = await checkAvailability(form.reservation_date, form.reservation_time, parseInt(form.guest_count), durationMinutes)
       if (!availability.available) { setError(availability.reason); setLoading(false); return }
 
       const customerId = await findOrCreateCustomer({
@@ -410,7 +411,7 @@ export default function Reservations() {
         .single()
       if (bookingError) throw bookingError
       setBookingId(booking.id)
-      autoAssignTables(booking.id, form.reservation_date, form.reservation_time, parseInt(form.guest_count))
+      autoAssignTables(booking.id, form.reservation_date, form.reservation_time, parseInt(form.guest_count), durationMinutes)
       const { data: msgData } = await supabase.from('settings').select('value').eq('key', 'confirmation_message_reservation').maybeSingle()
       if (msgData?.value) setConfirmationMessage(msgData.value)
       setSubmitted(true)

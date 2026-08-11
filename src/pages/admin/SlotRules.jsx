@@ -9,7 +9,7 @@ const DEFAULT_CONFIG = [
     day_type: 'weekday',
     label: 'Weekday (Sun–Thu)',
     rule_type: 'open',
-    closed_days: [],
+    closed_days: [], hold_duration_minutes: 120,
     sessions: [
       { label: 'All Day', start: '12:00', end: '22:00', last_booking: '21:00' }
     ]
@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = [
     day_type: 'weekend',
     label: 'Weekend (Fri–Sat)',
     rule_type: 'open',
-    closed_days: [],
+    closed_days: [], hold_duration_minutes: 120,
     sessions: [
       { label: 'All Day', start: '12:00', end: '00:00', last_booking: '23:00' }
     ]
@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = [
     day_type: 'public_holiday',
     label: 'Public Holiday',
     rule_type: 'open',
-    closed_days: [],
+    closed_days: [], hold_duration_minutes: 120,
     sessions: [
       { label: 'All Day', start: '12:00', end: '22:00', last_booking: '21:00' }
     ]
@@ -60,6 +60,7 @@ export default function SlotRules() {
         day_type: def.day_type, label: def.label,
         rule_type: slot?.rule_type || def.rule_type,
         closed_days: hours?.closed_days || def.closed_days,
+        hold_duration_minutes: slot?.hold_duration_minutes ?? def.hold_duration_minutes,
         sessions: slot?.sessions?.length > 0 ? slot.sessions
           : hours?.sessions?.length > 0 ? hours.sessions
           : def.sessions
@@ -73,9 +74,9 @@ export default function SlotRules() {
     for (const c of config) {
       const { data: existingSlot } = await supabase.from('slot_rules').select('id').eq('day_type', c.day_type).maybeSingle()
       if (existingSlot) {
-        await supabase.from('slot_rules').update({ rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [] }).eq('day_type', c.day_type)
+        await supabase.from('slot_rules').update({ rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [], hold_duration_minutes: c.hold_duration_minutes }).eq('day_type', c.day_type)
       } else {
-        await supabase.from('slot_rules').insert({ day_type: c.day_type, rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [] })
+        await supabase.from('slot_rules').insert({ day_type: c.day_type, rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [], hold_duration_minutes: c.hold_duration_minutes })
       }
       const { data: existingHours } = await supabase.from('operating_hours').select('id').eq('day_type', c.day_type).maybeSingle()
       if (existingHours) {
@@ -90,6 +91,11 @@ export default function SlotRules() {
 
   function updateRuleType(day_type, rule_type) {
     setConfig(prev => prev.map(c => c.day_type === day_type ? { ...c, rule_type } : c))
+  }
+
+  function updateHoldDuration(day_type, value) {
+    const hold_duration_minutes = value === '' ? '' : parseInt(value)
+    setConfig(prev => prev.map(c => c.day_type === day_type ? { ...c, hold_duration_minutes } : c))
   }
 
   function toggleClosedDay(day_type, day) {
@@ -204,6 +210,14 @@ export default function SlotRules() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Hold Duration */}
+          <div className="mb-5">
+            <p className={labelClass}>Table Hold Duration (minutes)</p>
+            <input type="number" min="1" value={c.hold_duration_minutes}
+              onChange={e => updateHoldDuration(c.day_type, e.target.value)}
+              className={inputClass + ' w-28'} />
           </div>
 
           {/* Sessions */}

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
 import { computeTableStatus, getLocalToday, isToday } from '../../lib/tableAvailability'
+import { getDayType } from '../../lib/dayType'
 
 const DATE_DEBOUNCE_MS = 300
 
@@ -101,14 +102,14 @@ function getTableLabel(table, assignedReservations, todayView) {
   return { line1: table.table_number, line2: null }
 }
 
-function checkTimeConflict(existingReservations, newReservation) {
+function checkTimeConflict(existingReservations, newReservation, durationMinutes) {
   const [newH, newM] = newReservation.reservation_time.split(':').map(Number)
   const newMins = newH * 60 + newM
   for (const r of existingReservations) {
     const [h, m] = r.reservation_time.split(':').map(Number)
     const existMins = h * 60 + m
     const diff = Math.abs(newMins - existMins)
-    if (diff < 120) return { conflict: true, reservation: r, diff }
+    if (diff < durationMinutes) return { conflict: true, reservation: r, diff }
   }
   return { conflict: false }
 }
@@ -125,6 +126,7 @@ export default function Tables() {
   const [tables, setTables] = useState([])
   const [reservations, setReservations] = useState([])
   const [statusByTable, setStatusByTable] = useState(new Map())
+  const [holdDurationMinutes, setHoldDurationMinutes] = useState(120)
   const [dateInputValue, setDateInputValue] = useState(getLocalToday())
   const [selectedDate, setSelectedDate] = useState(getLocalToday())
   const [selected, setSelected] = useState(null)
@@ -164,7 +166,8 @@ export default function Tables() {
 
   async function fetchAll() {
     const requestId = ++requestIdRef.current
-    const [{ data: tableData }, { data: resData }, { data: blockData }] = await Promise.all([
+    const dayType = await getDayType(selectedDate)
+    const [{ data: tableData }, { data: resData }, { data: blockData }, { data: slotRuleData }] = await Promise.all([
       supabase.from('restaurant_tables').select('*'),
       supabase.from('reservations')
         .select('*')
@@ -173,7 +176,8 @@ export default function Tables() {
         .order('reservation_time', { ascending: true }),
       supabase.from('table_blocks')
         .select('id, table_id, reason, source_type, source_id')
-        .eq('block_date', selectedDate)
+        .eq('block_date', selectedDate),
+      supabase.from('slot_rules').select('hold_duration_minutes').eq('day_type', dayType).maybeSingle()
     ])
 
     const reservationsData = resData || []
@@ -197,6 +201,7 @@ export default function Tables() {
     const reservationRows = reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] }))
     setTables(tableRows)
     setReservations(reservationRows)
+    setHoldDurationMinutes(slotRuleData?.hold_duration_minutes ?? 120)
     const statusList = computeTableStatus({
       dateString: selectedDate,
       tables: tableRows,
@@ -245,7 +250,7 @@ export default function Tables() {
   async function assignTable(tableId, reservationId) {
     const reservation = reservations.find(r => r.id === reservationId)
     const tableReservations = getTableReservations(tableId)
-    const conflict = checkTimeConflict(tableReservations, reservation)
+    const conflict = checkTimeConflict(tableReservations, reservation, holdDurationMinutes)
     const table = tables.find(t => t.id === tableId)
 
     // Check capacity
@@ -292,7 +297,7 @@ export default function Tables() {
     const [h, m] = reservation.reservation_time.split(':').map(Number)
     const lockFrom = new Date()
     lockFrom.setHours(h, m, 0, 0)
-    const lockUntil = new Date(lockFrom.getTime() + 2 * 60 * 60 * 1000)
+    const lockUntil = new Date(lockFrom.getTime() + holdDurationMinutes * 60 * 1000)
     await supabase.from('restaurant_tables')
       .update({ locked_until: lockUntil.toISOString(), locked_by_reservation: reservationId })
       .eq('id', tableId)

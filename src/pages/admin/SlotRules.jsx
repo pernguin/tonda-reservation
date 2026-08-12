@@ -41,18 +41,25 @@ export default function SlotRules() {
   const [newReason, setNewReason] = useState('')
   const [newMaxPax, setNewMaxPax] = useState('')
   const [isClosed, setIsClosed] = useState(false)
+  const [blackoutDates, setBlackoutDates] = useState([])
+  const [newBlackoutDate, setNewBlackoutDate] = useState('')
+  const [newBlackoutStart, setNewBlackoutStart] = useState('')
+  const [newBlackoutEnd, setNewBlackoutEnd] = useState('')
+  const [newBlackoutReason, setNewBlackoutReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
-    const [{ data: slotData }, { data: hoursData }, { data: datesData }] = await Promise.all([
+    const [{ data: slotData }, { data: hoursData }, { data: datesData }, { data: blackoutData }] = await Promise.all([
       supabase.from('slot_rules').select('*'),
       supabase.from('operating_hours').select('*'),
-      supabase.from('blocked_dates').select('*').order('blocked_date', { ascending: true })
+      supabase.from('blocked_dates').select('*').order('blocked_date', { ascending: true }),
+      supabase.from('blackout_dates').select('*').order('block_date', { ascending: true })
     ])
     setBlockedDates(datesData || [])
+    setBlackoutDates(blackoutData || [])
     const merged = DEFAULT_CONFIG.map(def => {
       const slot = (slotData || []).find(s => s.day_type === def.day_type)
       const hours = (hoursData || []).find(h => h.day_type === def.day_type)
@@ -148,6 +155,23 @@ export default function SlotRules() {
 
   async function removeDateControl(id) {
     await supabase.from('blocked_dates').delete().eq('id', id)
+    fetchAll()
+  }
+
+  async function addBlackoutDate() {
+    if (!newBlackoutDate) return
+    await supabase.from('blackout_dates').insert({
+      block_date: newBlackoutDate,
+      start_time: newBlackoutStart || null,
+      end_time: newBlackoutEnd || null,
+      reason: newBlackoutReason || null
+    })
+    setNewBlackoutDate(''); setNewBlackoutStart(''); setNewBlackoutEnd(''); setNewBlackoutReason('')
+    fetchAll()
+  }
+
+  async function removeBlackoutDate(id) {
+    await supabase.from('blackout_dates').delete().eq('id', id)
     fetchAll()
   }
 
@@ -320,6 +344,65 @@ export default function SlotRules() {
                   </p>
                 </div>
                 <button onClick={() => removeDateControl(d.id)}
+                  className="text-xs text-red-400 hover:text-red-600 tracking-widest uppercase transition-colors">
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Blackout Dates */}
+      <div className="mt-12 pt-8 border-t border-gray-100">
+        <h2 className="text-lg font-medium text-gray-900 mb-5">Blackout Dates</h2>
+        <p className="text-sm text-gray-400 mb-6">Block reservations for a date, or a specific time window within a date. Leave start/end empty to block the whole date.</p>
+
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className={labelClass}>Date *</label>
+            <input type="date" value={newBlackoutDate} onChange={e => setNewBlackoutDate(e.target.value)}
+              className={inputClass + ' w-full'} />
+          </div>
+          <div>
+            <label className={labelClass}>Reason (optional)</label>
+            <input type="text" value={newBlackoutReason} onChange={e => setNewBlackoutReason(e.target.value)}
+              placeholder="e.g. Kitchen closed for maintenance"
+              className={inputClass + ' w-full'} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className={labelClass}>Start Time (optional)</label>
+            <input type="time" value={newBlackoutStart} onChange={e => setNewBlackoutStart(e.target.value)}
+              className={inputClass + ' w-full'} />
+          </div>
+          <div>
+            <label className={labelClass}>End Time (optional)</label>
+            <input type="time" value={newBlackoutEnd} onChange={e => setNewBlackoutEnd(e.target.value)}
+              className={inputClass + ' w-full'} />
+          </div>
+        </div>
+
+        <button onClick={addBlackoutDate}
+          className="px-6 py-2.5 text-xs font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 mb-6"
+          style={{ backgroundColor: BRAND }}>
+          Add Blackout
+        </button>
+
+        {blackoutDates.length > 0 && (
+          <div className="border-t border-gray-100">
+            {blackoutDates.map(b => (
+              <div key={b.id} className="flex items-center justify-between py-4 border-b border-gray-100">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{b.block_date}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {b.start_time && b.end_time ? `${b.start_time.slice(0, 5)}–${b.end_time.slice(0, 5)}` : 'Whole day'}
+                    {b.reason ? ` — ${b.reason}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => removeBlackoutDate(b.id)}
                   className="text-xs text-red-400 hover:text-red-600 tracking-widest uppercase transition-colors">
                   Remove
                 </button>

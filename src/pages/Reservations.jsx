@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers, findOrCreateCustomer } from '../supabaseCustomers'
@@ -16,7 +16,7 @@ async function getDateInfo(date) {
     .maybeSingle()
 
   if (blocked?.is_closed) return { closed: true, reason: 'Sorry, reservations are not available on this date.' }
-  if (blocked?.max_pax) return { closed: false, max_pax: blocked.max_pax }
+  const max_pax = blocked?.max_pax ?? null
 
   let day_type = (day === 5 || day === 6) ? 'weekend' : 'weekday'
   // day 5 = Friday, day 6 = Saturday
@@ -44,7 +44,7 @@ async function getDateInfo(date) {
     .eq('day_type', day_type)
     .maybeSingle()
 
-  return { closed: false, day_type, dayName, slotRule, operatingHours: hours }
+  return { closed: false, day_type, dayName, slotRule, operatingHours: hours, max_pax }
 }
 
 function getTablesNeeded(guestCount) {
@@ -56,30 +56,67 @@ function getTablesNeeded(guestCount) {
   return { count: 0, type: 'none' }
 }
 
-async function checkAvailability(date, time, guestCount, durationMinutes) {
+async function getSmallTableCapacity() {
+  const { data: bookableTables } = await supabase
+    .from('restaurant_tables')
+    .select('table_number, capacity')
+    .eq('is_bookable', true)
+
+  return (bookableTables || [])
+    .filter(t => t.table_number !== 'BT' && (t.capacity || 0) >= 2)
+    .reduce((sum, t) => sum + t.capacity, 0)
+}
+
+async function getBlackoutWindows(date) {
+  const { data } = await supabase
+    .from('blackout_dates')
+    .select('start_time, end_time')
+    .eq('block_date', date)
+  return data || []
+}
+
+// A row with both times null blacks out the whole date. A row with only one
+// bound set treats the missing bound as the day's edge (00:00 / 23:59).
+function isBlackedOut(blackoutWindows, time, durationMinutes) {
+  const [h, m] = time.split(':').map(Number)
+  const startMins = h * 60 + m
+  const endMins = startMins + durationMinutes
+
+  return blackoutWindows.some(w => {
+    if (!w.start_time && !w.end_time) return true
+    const [wsH, wsM] = (w.start_time || '00:00').split(':').map(Number)
+    const [weH, weM] = (w.end_time || '23:59').split(':').map(Number)
+    const windowStart = wsH * 60 + wsM
+    const windowEnd = weH * 60 + weM
+    return startMins < windowEnd && endMins > windowStart
+  })
+}
+
+// Pure: decides availability for one candidate time from already-fetched
+// reservations/capacity/blackouts, so a multi-slot search doesn't re-fetch
+// per slot. Blackout is checked first, before any capacity/table math.
+function computeAvailability(existingReservations, totalSmallCapacity, blackoutWindows, date, time, guestCount, durationMinutes) {
+  if (isBlackedOut(blackoutWindows, time, durationMinutes)) {
+    return { available: false, reason: 'Sorry, reservations are not available at this time.' }
+  }
+
   const bookingStart = new Date(`${date}T${time}`)
   const bookingEnd = new Date(bookingStart.getTime() + durationMinutes * 60 * 1000)
 
-  const { data: existing } = await supabase
-    .from('reservations')
-    .select('*')
-    .eq('reservation_date', date)
-    .in('status', ['confirmed', 'pending', 'seated'])
-
-  let bookedSmall = 0
+  let bookedSmallSeats = 0
   let bigTableBooked = false
 
-  for (const booking of existing || []) {
+  for (const booking of existingReservations || []) {
     const existStart = new Date(`${booking.reservation_date}T${booking.reservation_time}`)
     const existEnd = new Date(existStart.getTime() + durationMinutes * 60 * 1000)
     const overlaps = bookingStart < existEnd && bookingEnd > existStart
     if (overlaps) {
       if (booking.table_type === 'big') bigTableBooked = true
-      else bookedSmall += (booking.tables_count || 1)
+      else bookedSmallSeats += (booking.guest_count || 0)
     }
   }
 
-  const availableSmall = 12 - bookedSmall
+  const availableSmallSeats = totalSmallCapacity - bookedSmallSeats
 
   if (guestCount >= 6 && guestCount <= 8 && !bigTableBooked) {
     return { available: true, type: 'big', count: 1, autoConfirm: true }
@@ -92,11 +129,110 @@ async function checkAvailability(date, time, guestCount, durationMinutes) {
   if (tableNeeds.type === 'none') {
     return { available: false, reason: 'Party size too large — please contact us directly.' }
   }
-  if (tableNeeds.count > availableSmall) {
+  if (guestCount > availableSmallSeats) {
     return { available: false, reason: `Sorry, we don't have enough tables for this time slot. Please choose a different time.` }
   }
 
   return { available: true, type: 'small', count: tableNeeds.count, autoConfirm: true }
+}
+
+async function checkAvailability(date, time, guestCount, durationMinutes) {
+  const [{ data: existing }, totalSmallCapacity, blackoutWindows] = await Promise.all([
+    supabase
+      .from('reservations')
+      .select('*')
+      .eq('reservation_date', date)
+      .in('status', ['confirmed', 'pending', 'seated']),
+    getSmallTableCapacity(),
+    getBlackoutWindows(date)
+  ])
+  return computeAvailability(existing || [], totalSmallCapacity, blackoutWindows, date, time, guestCount, durationMinutes)
+}
+
+// Runs computeAvailability across every candidate slot in one pass (single
+// fetch of reservations/capacity/blackouts) and keeps only the slots that are
+// actually bookable, dropping any session group left with none.
+async function searchAvailability(date, guestCount, durationMinutes, slotGroups) {
+  const [{ data: existing }, totalSmallCapacity, blackoutWindows] = await Promise.all([
+    supabase
+      .from('reservations')
+      .select('*')
+      .eq('reservation_date', date)
+      .in('status', ['confirmed', 'pending', 'seated']),
+    getSmallTableCapacity(),
+    getBlackoutWindows(date)
+  ])
+
+  return slotGroups
+    .map(group => ({
+      sessionLabel: group.sessionLabel,
+      slots: group.slots.filter(slot =>
+        computeAvailability(existing || [], totalSmallCapacity, blackoutWindows, date, slot.value, guestCount, durationMinutes).available
+      )
+    }))
+    .filter(group => group.slots.length > 0)
+}
+
+function formatTime12(time24) {
+  const [h, m] = time24.split(':').map(Number)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
+  return `${hour}:${String(m).padStart(2, '0')} ${ampm}`
+}
+
+function formatTimeRange(time24, durationMinutes) {
+  const [h, m] = time24.split(':').map(Number)
+  const startMins = h * 60 + m
+  const endMins = startMins + durationMinutes
+  const endH = Math.floor(endMins / 60) % 24
+  const endM = endMins % 60
+  const endTime24 = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+  return `${formatTime12(time24)} – ${formatTime12(endTime24)}`
+}
+
+function formatDuration(minutes) {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  const parts = []
+  if (h > 0) parts.push(`${h} hour${h !== 1 ? 's' : ''}`)
+  if (m > 0) parts.push(`${m} minute${m !== 1 ? 's' : ''}`)
+  return parts.join(' ') || '0 minutes'
+}
+
+// Groups: 'open' rule_type yields one group per operating-hours session
+// (e.g. Lunch, Dinner), each with 30-min pills across that session's window.
+function getOpenSlots(sessions) {
+  return (sessions || []).map(session => {
+    const [startH, startM] = session.start.split(':').map(Number)
+    const lastBooking = session.last_booking || session.end
+    const [lastH, lastM] = lastBooking.split(':').map(Number)
+    let current = startH * 60 + startM
+    const last = lastH * 60 + lastM
+    const slots = []
+    while (current <= last) {
+      const h = Math.floor(current / 60)
+      const m = current % 60
+      const time24 = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+      slots.push({ value: time24, label: formatTime12(time24) })
+      current += 30
+    }
+    return { sessionLabel: session.label || '', slots }
+  })
+}
+
+// 'session' rule_type yields one group per fixed session, each with a single
+// pill at that session's start time (fixed-session bookings have no range).
+function getFixedSlots(sessions) {
+  return (sessions || []).map(session => ({
+    sessionLabel: session.label || '',
+    slots: [{ value: session.start, label: formatTime12(session.start) }]
+  }))
+}
+
+function getTimeSlotGroups(info) {
+  if (!info?.slotRule) return []
+  if (info.slotRule.rule_type === 'session') return getFixedSlots(info.slotRule.sessions)
+  return getOpenSlots(info.operatingHours?.sessions || [])
 }
 
 function isTimeWithinSessions(time, sessions) {
@@ -107,38 +243,6 @@ function isTimeWithinSessions(time, sessions) {
     const lastBooking = session.last_booking || session.end
     const [lastH, lastM] = lastBooking.split(':').map(Number)
     return timeMins >= startH * 60 + startM && timeMins <= lastH * 60 + lastM
-  })
-}
-
-function getOpenSlots(sessions) {
-  const slots = []
-  for (const session of sessions || []) {
-    const [startH, startM] = session.start.split(':').map(Number)
-    const lastBooking = session.last_booking || session.end
-    const [lastH, lastM] = lastBooking.split(':').map(Number)
-    let current = startH * 60 + startM
-    const last = lastH * 60 + lastM
-    while (current <= last) {
-      const h = Math.floor(current / 60)
-      const m = current % 60
-      const time24 = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-      const ampm = h >= 12 ? 'PM' : 'AM'
-      const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
-      const label = `${hour}:${String(m).padStart(2, '0')} ${ampm}${session.label ? ` — ${session.label}` : ''}`
-      slots.push({ value: time24, label })
-      current += 30
-    }
-  }
-  return slots
-}
-
-function getFixedSlots(sessions) {
-  return (sessions || []).map(session => {
-    const [h, m] = session.start.split(':').map(Number)
-    const ampm = h >= 12 ? 'PM' : 'AM'
-    const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
-    const defaultLabel = `${hour}:${String(m).padStart(2, '0')} ${ampm}`
-    return { value: session.start, label: session.label || defaultLabel }
   })
 }
 
@@ -279,11 +383,15 @@ export default function Reservations() {
     guest_count: '', notes: '',
     baby_chairs: 0, pets: false
   })
-  const [dateInfo, setDateInfo] = useState(null)
-  const [dateLoading, setDateLoading] = useState(false)
-  const [dateError, setDateError] = useState(null)
+  const [hasSearched, setHasSearched] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState(null)
+  const [availableGroups, setAvailableGroups] = useState([])
+  const [selectedSlot, setSelectedSlot] = useState(null)
+  const [searchDurationMinutes, setSearchDurationMinutes] = useState(120)
   const [submitted, setSubmitted] = useState(false)
   const [bookingId, setBookingId] = useState(null)
+  const [confirmedBooking, setConfirmedBooking] = useState(null)
   const [confirmationMessage, setConfirmationMessage] = useState('Thank you for your reservation request. Our team will contact you shortly to confirm your booking.')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -291,6 +399,7 @@ export default function Reservations() {
   const [birthdayInput, setBirthdayInput] = useState('')
   const [birthdaySkipped, setBirthdaySkipped] = useState(false)
   const [experiences, setExperiences] = useState([])
+  const researchDebounceRef = useRef(null)
 
   useEffect(() => {
     async function fetchExperiences() {
@@ -304,6 +413,11 @@ export default function Reservations() {
       setExperiences(data || [])
     }
     fetchExperiences()
+  }, [])
+
+  // Clear any pending debounce on unmount so it doesn't fire after teardown.
+  useEffect(() => () => {
+    if (researchDebounceRef.current) clearTimeout(researchDebounceRef.current)
   }, [])
 
   const handleChange = (e) => {
@@ -335,26 +449,65 @@ export default function Reservations() {
     }
   }
 
-  async function handleDateChange(e) {
-    const date = e.target.value
-    setForm(prev => ({ ...prev, reservation_date: date, reservation_time: '' }))
-    setDateInfo(null)
-    setDateError(null)
-    if (!date) return
-    setDateLoading(true)
+  async function runSearch(dateArg, guestsArg) {
+    const date = dateArg ?? form.reservation_date
+    const guestsRaw = guestsArg ?? form.guest_count
+    setSelectedSlot(null)
+    setAvailableGroups([])
+    setSearchError(null)
+    if (!date || !guestsRaw) return
+
+    setSearchLoading(true)
     const info = await getDateInfo(date)
-    setDateLoading(false)
-    if (info.closed) { setDateError(info.reason); return }
-    setDateInfo(info)
+    if (info.closed) {
+      setSearchLoading(false)
+      setSearchError(info.reason)
+      setHasSearched(true)
+      return
+    }
+
+    const guestCount = parseInt(guestsRaw)
+    if (info.max_pax && guestCount > info.max_pax) {
+      setSearchLoading(false)
+      setSearchError(`Sorry, we can only accommodate up to ${info.max_pax} guests on this date.`)
+      setHasSearched(true)
+      return
+    }
+
+    const durationMinutes = info.slotRule?.hold_duration_minutes ?? 120
+    const slotGroups = getTimeSlotGroups(info)
+    const resultGroups = await searchAvailability(date, guestCount, durationMinutes, slotGroups)
+
+    setSearchDurationMinutes(durationMinutes)
+    setAvailableGroups(resultGroups)
+    setHasSearched(true)
+    setSearchLoading(false)
   }
 
-  function getTimeSlots() {
-    if (!dateInfo?.slotRule) return []
-    if (dateInfo.slotRule.rule_type === 'session') return getFixedSlots(dateInfo.slotRule.sessions)
-    return getOpenSlots(dateInfo.operatingHours?.sessions || [])
+  function handleGuestsChange(e) {
+    const value = e.target.value
+    setForm(prev => ({ ...prev, guest_count: value }))
+    if (hasSearched) {
+      setSelectedSlot(null)
+      if (researchDebounceRef.current) clearTimeout(researchDebounceRef.current)
+      researchDebounceRef.current = setTimeout(() => runSearch(form.reservation_date, value), 400)
+    }
   }
 
-  const timeSlots = getTimeSlots()
+  function handleSearchDateChange(e) {
+    const value = e.target.value
+    setForm(prev => ({ ...prev, reservation_date: value }))
+    if (hasSearched) {
+      setSelectedSlot(null)
+      if (researchDebounceRef.current) clearTimeout(researchDebounceRef.current)
+      researchDebounceRef.current = setTimeout(() => runSearch(value, form.guest_count), 400)
+    }
+  }
+
+  function handleSelectSlot(slot) {
+    setSelectedSlot(slot)
+    setForm(prev => ({ ...prev, reservation_time: slot.value }))
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -411,6 +564,7 @@ export default function Reservations() {
         .single()
       if (bookingError) throw bookingError
       setBookingId(booking.id)
+      setConfirmedBooking({ time: form.reservation_time, durationMinutes })
       autoAssignTables(booking.id, form.reservation_date, form.reservation_time, parseInt(form.guest_count), durationMinutes)
       const { data: msgData } = await supabase.from('settings').select('value').eq('key', 'confirmation_message_reservation').maybeSingle()
       if (msgData?.value) setConfirmationMessage(msgData.value)
@@ -450,6 +604,11 @@ function CopyButton({ text }) {
             </svg>
           </div>
           <h2 className="text-2xl font-light mb-3" style={{ color: BRAND }}>Request Received</h2>
+          {confirmedBooking && (
+            <p className="text-sm font-medium text-gray-700 mb-2">
+              {formatTimeRange(confirmedBooking.time, confirmedBooking.durationMinutes)}
+            </p>
+          )}
           <p className="text-gray-500 text-sm leading-relaxed mb-6">{confirmationMessage}</p>
           <div className="border border-gray-200 rounded-xl p-4 mb-8 text-left"
             style={{ backgroundColor: 'white' }}>
@@ -481,7 +640,7 @@ function CopyButton({ text }) {
           Tonda Pizza Romana
         </p>
         <h1 className="text-3xl font-light text-gray-900 mb-2">Make a Reservation</h1>
-        <p className="text-gray-400 text-sm mb-12">Fill in your details and we'll confirm your booking shortly.</p>
+        <p className="text-gray-400 text-sm mb-12">Search for a time, then fill in your details to request a booking.</p>
 
         {error && (
           <div className="border-l-2 pl-4 mb-8 py-2" style={{ borderColor: BRAND }}>
@@ -490,115 +649,151 @@ function CopyButton({ text }) {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-8">
-          <div>
-            <label className={labelClass}>Full Name *</label>
-            <input name="full_name" value={form.full_name} onChange={handleChange} required
-              placeholder="Your full name"
-              className={inputClass} />
+
+          <div className="border border-gray-200 rounded-xl p-4" style={{ backgroundColor: 'white' }}>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={labelClass}>Guests *</label>
+                <input name="guest_count" type="number" min="1" max="50"
+                  value={form.guest_count} onChange={handleGuestsChange} required
+                  placeholder="2"
+                  className={inputClass} />
+              </div>
+              <div>
+                <label className={labelClass}>Date *</label>
+                <input name="reservation_date" type="date" value={form.reservation_date}
+                  onChange={handleSearchDateChange} required
+                  className={inputClass} />
+              </div>
+            </div>
+            <button type="button" onClick={() => runSearch()}
+              disabled={!form.reservation_date || !form.guest_count || searchLoading}
+              className="w-full py-3 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+              style={{ backgroundColor: BRAND }}>
+              {searchLoading ? 'Searching...' : 'Search'}
+            </button>
           </div>
 
-          <div>
-            <label className={labelClass}>Phone Number *</label>
-            <input name="phone" value={form.phone} onChange={handleChange} onBlur={handlePhoneBlur} required
-              placeholder="+60 12 345 6789"
-              className={inputClass} />
-            {existingCustomer && !existingCustomer.birthdate && !birthdaySkipped && (
-              <div className="mt-3">
-                <p className="text-xs text-gray-500 mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
-                <div className="flex items-center gap-4">
+          {hasSearched && !searchLoading && searchError && (
+            <p className="text-sm" style={{ color: BRAND }}>{searchError}</p>
+          )}
+
+          {hasSearched && !searchLoading && !searchError && availableGroups.length === 0 && (
+            <div className="border border-gray-200 rounded-lg p-6 text-center">
+              <p className="text-sm text-gray-500">No availability for this date. Please try a different date or guest count.</p>
+            </div>
+          )}
+
+          {hasSearched && !searchLoading && !searchError && availableGroups.length > 0 && (
+            <div>
+              <label className={labelClass}>Available Times</label>
+              <div className="mt-2 space-y-4">
+                {availableGroups.map((group, i) => (
+                  <div key={group.sessionLabel || i}>
+                    {group.sessionLabel && (
+                      <p className="text-xs text-gray-400 mb-2">{group.sessionLabel}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {group.slots.map(slot => {
+                        const isSelected = selectedSlot?.value === slot.value
+                        return (
+                          <button key={slot.value} type="button"
+                            onClick={() => handleSelectSlot(slot)}
+                            className="px-4 py-2 rounded-full text-sm font-medium border transition-colors"
+                            style={isSelected
+                              ? { backgroundColor: BRAND, color: 'white', borderColor: BRAND }
+                              : { backgroundColor: 'white', color: '#374151', borderColor: '#d1d5db' }}>
+                            {slot.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-4">
+                Tables are held for {formatDuration(searchDurationMinutes)} from your reservation time. Please arrive on time — we may release your table to walk-ins if you're significantly late.
+              </p>
+            </div>
+          )}
+
+          {selectedSlot && (
+            <>
+              <div>
+                <label className={labelClass}>Full Name *</label>
+                <input name="full_name" value={form.full_name} onChange={handleChange} required
+                  placeholder="Your full name"
+                  className={inputClass} />
+              </div>
+
+              <div>
+                <label className={labelClass}>Phone Number *</label>
+                <input name="phone" value={form.phone} onChange={handleChange} onBlur={handlePhoneBlur} required
+                  placeholder="+60 12 345 6789"
+                  className={inputClass} />
+                {existingCustomer && !existingCustomer.birthdate && !birthdaySkipped && (
+                  <div className="mt-3">
+                    <p className="text-xs text-gray-500 mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
+                    <div className="flex items-center gap-4">
+                      <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
+                        className={inputClass} />
+                      <button type="button"
+                        onClick={() => { setBirthdaySkipped(true); setBirthdayInput('') }}
+                        className="text-xs tracking-widest uppercase shrink-0 transition-opacity hover:opacity-70"
+                        style={{ color: BRAND }}>
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className={labelClass}>Email</label>
+                <input name="email" type="email" value={form.email} onChange={handleChange}
+                  placeholder="your@email.com"
+                  className={inputClass} />
+              </div>
+
+              {existingCustomer === null && (
+                <div>
+                  <label className={labelClass}>Birthday (optional)</label>
                   <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
                     className={inputClass} />
-                  <button type="button"
-                    onClick={() => { setBirthdaySkipped(true); setBirthdayInput('') }}
-                    className="text-xs tracking-widest uppercase shrink-0 transition-opacity hover:opacity-70"
-                    style={{ color: BRAND }}>
-                    Skip
-                  </button>
+                  <p className="text-xs text-gray-400 mt-1">We'd love to celebrate with you 🎂</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className={labelClass}>Baby Chairs</label>
+                  <input name="baby_chairs" type="number" min="0"
+                    value={form.baby_chairs} onChange={handleChange}
+                    className={inputClass} />
+                </div>
+                <div className="flex items-end pb-3">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input name="pets" type="checkbox" checked={form.pets} onChange={handleChange}
+                      className="w-4 h-4" />
+                    I'm bringing a pet 🐾
+                  </label>
                 </div>
               </div>
-            )}
-          </div>
 
-          <div>
-            <label className={labelClass}>Email</label>
-            <input name="email" type="email" value={form.email} onChange={handleChange}
-              placeholder="your@email.com"
-              className={inputClass} />
-          </div>
+              <div>
+                <label className={labelClass}>Special Requests</label>
+                <textarea name="notes" value={form.notes} onChange={handleChange} rows={3}
+                  placeholder="Dietary requirements, allergies, celebrations..."
+                  className={inputClass + ' resize-none'} />
+              </div>
 
-          {existingCustomer === null && (
-            <div>
-              <label className={labelClass}>Birthday (optional)</label>
-              <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
-                className={inputClass} />
-              <p className="text-xs text-gray-400 mt-1">We'd love to celebrate with you 🎂</p>
-            </div>
+              <button type="submit" disabled={loading}
+                className="w-full py-4 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                style={{ backgroundColor: BRAND }}>
+                {loading ? 'Submitting...' : 'Request Reservation'}
+              </button>
+            </>
           )}
-
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <label className={labelClass}>Number of Guests *</label>
-              <input name="guest_count" type="number" min="1" max="50"
-                value={form.guest_count} onChange={handleChange} required
-                placeholder="2"
-                className={inputClass} />
-            </div>
-            <div>
-              <label className={labelClass}>Date *</label>
-              <input name="reservation_date" type="date" value={form.reservation_date}
-                onChange={handleDateChange} required
-                className={inputClass} />
-              {dateLoading && <p className="text-xs text-gray-400 mt-1">Checking availability...</p>}
-              {dateError && <p className="text-xs mt-1" style={{ color: BRAND }}>{dateError}</p>}
-            </div>
-          </div>
-
-          {dateInfo && timeSlots.length > 0 && (
-            <div>
-              <label className={labelClass}>Time *</label>
-              <select name="reservation_time" value={form.reservation_time}
-                onChange={handleChange} required
-                className={inputClass}>
-                <option value="">Select a time</option>
-                {timeSlots.map(slot => (
-                  <option key={slot.value} value={slot.value}>{slot.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {dateInfo && timeSlots.length === 0 && (
-            <p className="text-sm" style={{ color: BRAND }}>No available time slots for this date.</p>
-          )}
-
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <label className={labelClass}>Baby Chairs</label>
-              <input name="baby_chairs" type="number" min="0"
-                value={form.baby_chairs} onChange={handleChange}
-                className={inputClass} />
-            </div>
-            <div className="flex items-end pb-3">
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                <input name="pets" type="checkbox" checked={form.pets} onChange={handleChange}
-                  className="w-4 h-4" />
-                I'm bringing a pet 🐾
-              </label>
-            </div>
-          </div>
-
-          <div>
-            <label className={labelClass}>Special Requests</label>
-            <textarea name="notes" value={form.notes} onChange={handleChange} rows={3}
-              placeholder="Dietary requirements, allergies, celebrations..."
-              className={inputClass + ' resize-none'} />
-          </div>
-
-          <button type="submit" disabled={loading || !!dateError || !dateInfo}
-            className="w-full py-4 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-            style={{ backgroundColor: BRAND }}>
-            {loading ? 'Submitting...' : 'Request Reservation'}
-          </button>
         </form>
       </div>
 

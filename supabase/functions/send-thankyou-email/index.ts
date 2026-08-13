@@ -2,7 +2,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("TONDA_SERVICE_ROLE_KEY")!;
 const ROUND_SUPABASE_URL = Deno.env.get("ROUND_SUPABASE_URL")!;
 const ROUND_SUPABASE_ANON_KEY = Deno.env.get("ROUND_SUPABASE_ANON_KEY")!;
 

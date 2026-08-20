@@ -425,7 +425,14 @@ export default function Reservations() {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
+    // A phone edit while stale auto-filled data is showing must not let that
+    // data ride along attached to a now-different phone number.
+    const hadMatch = name === 'phone' && lookupStatus === 'found'
+    setForm(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+      ...(hadMatch ? { full_name: '', email: '' } : {})
+    }))
     if (name === 'phone') {
       setExistingCustomer(undefined)
       setBirthdayInput('')

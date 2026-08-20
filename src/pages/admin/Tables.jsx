@@ -294,13 +294,18 @@ export default function Tables() {
     const currentIds = Array.isArray(reservation.table_ids) ? reservation.table_ids : []
     const newIds = currentIds.includes(tableId) ? currentIds : [...currentIds, tableId]
     await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
+    // Lock the table for holdDurationMinutes from the reservation's own date+time
+    // (explicit y/m/d parsing, same pattern as getDateInfo — not new Date()/today).
     const [h, m] = reservation.reservation_time.split(':').map(Number)
-    const lockFrom = new Date()
-    lockFrom.setHours(h, m, 0, 0)
+    const [y, mo, d] = reservation.reservation_date.split('-').map(Number)
+    const lockFrom = new Date(y, mo - 1, d, h, m, 0, 0)
     const lockUntil = new Date(lockFrom.getTime() + holdDurationMinutes * 60 * 1000)
-    await supabase.from('restaurant_tables')
-      .update({ locked_until: lockUntil.toISOString(), locked_by_reservation: reservationId })
-      .eq('id', tableId)
+    await supabase.rpc('claim_restaurant_tables', {
+      p_table_ids: [tableId],
+      p_reservation_id: reservationId,
+      p_reservation_start: lockFrom.toISOString(),
+      p_lock_until: lockUntil.toISOString()
+    })
     await fetchAll()
     setSelected(null)
   }

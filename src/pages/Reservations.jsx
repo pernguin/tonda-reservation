@@ -258,7 +258,12 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
     const [resH, resM] = reservationTime.split(':').map(Number)
     const resMins = resH * 60 + resM
     const resEnd = resMins + durationMinutes
-    const reservationDateTime = new Date(`${reservationDate}T${reservationTime}`)
+    // Built from the reservation's own date, not new Date()/today — the same
+    // explicit y/m/d parsing used in getDateInfo, extended with h/m. Reused
+    // below for locked_until so a lock is never dated against today's date
+    // instead of the date actually being booked.
+    const [resYear, resMonth, resDay] = reservationDate.split('-').map(Number)
+    const reservationDateTime = new Date(resYear, resMonth - 1, resDay, resH, resM, 0, 0)
 
     // Filter out locked tables (locked within 2 hours of reservation time).
     // Compare as full datetimes, not just hour:minute — a lock from a
@@ -290,19 +295,30 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
 
     if (freeTables.length === 0) return
 
-    const singleTable = freeTables
+    // Try to find a single table with enough capacity first, smallest sufficient
+    // table first. The claim is atomic (see claim_restaurant_tables) and can lose
+    // a race to another concurrent booking — on loss, retry the next smallest
+    // sufficient candidate rather than giving up on the first one.
+    const singleCandidates = freeTables
       .filter(t => t.capacity >= guestCount)
-      .sort((a, b) => a.capacity - b.capacity)[0]
+      .sort((a, b) => a.capacity - b.capacity)
 
-    if (singleTable) {
-      const lockFrom = new Date()
-      lockFrom.setHours(resH, resM, 0, 0)
-      const lockUntil = new Date(lockFrom.getTime() + durationMinutes * 60 * 1000)
-      await supabase.from('reservations').update({ table_ids: [singleTable.id] }).eq('id', reservationId)
-      await supabase.from('restaurant_tables').update({
-        locked_until: lockUntil.toISOString(),
-        locked_by_reservation: reservationId
-      }).eq('id', singleTable.id)
+    if (singleCandidates.length > 0) {
+      const lockUntil = new Date(reservationDateTime.getTime() + durationMinutes * 60 * 1000)
+
+      for (const candidate of singleCandidates) {
+        const { error: claimError } = await supabase.rpc('claim_restaurant_tables', {
+          p_table_ids: [candidate.id],
+          p_reservation_id: reservationId,
+          p_reservation_start: reservationDateTime.toISOString(),
+          p_lock_until: lockUntil.toISOString()
+        })
+        if (!claimError) {
+          await supabase.from('reservations').update({ table_ids: [candidate.id] }).eq('id', reservationId)
+          return
+        }
+      }
+      console.error('Auto-assignment failed: all single-table candidates lost the claim race')
       return
     }
 
@@ -336,14 +352,21 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
 
       if (bestCombo) {
         const tableIds = bestCombo.map(t => t.id)
-        const lockFrom = new Date()
-        lockFrom.setHours(resH, resM, 0, 0)
-        const lockUntil = new Date(lockFrom.getTime() + durationMinutes * 60 * 1000)
+        const lockUntil = new Date(reservationDateTime.getTime() + durationMinutes * 60 * 1000)
+        // Combo claims are all-or-nothing (see claim_restaurant_tables). Unlike
+        // the single-table path, a lost race here isn't retried with a
+        // recomputed combo — rare enough in practice to just log and move on.
+        const { error: claimError } = await supabase.rpc('claim_restaurant_tables', {
+          p_table_ids: tableIds,
+          p_reservation_id: reservationId,
+          p_reservation_start: reservationDateTime.toISOString(),
+          p_lock_until: lockUntil.toISOString()
+        })
+        if (claimError) {
+          console.error('Auto-assignment failed: combo claim lost the race', claimError)
+          return
+        }
         await supabase.from('reservations').update({ table_ids: tableIds }).eq('id', reservationId)
-        await supabase.from('restaurant_tables').update({
-          locked_until: lockUntil.toISOString(),
-          locked_by_reservation: reservationId
-        }).in('id', tableIds)
         return
       }
     }

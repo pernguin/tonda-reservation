@@ -372,7 +372,7 @@ function normalisePhone(raw) {
   return p
 }
 
-const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400"
+const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400 disabled:opacity-40 disabled:cursor-not-allowed"
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
 
 export default function Reservations() {
@@ -399,7 +399,9 @@ export default function Reservations() {
   const [birthdayInput, setBirthdayInput] = useState('')
   const [birthdaySkipped, setBirthdaySkipped] = useState(false)
   const [experiences, setExperiences] = useState([])
+  const [lookupStatus, setLookupStatus] = useState('idle') // 'idle' | 'loading' | 'found' | 'not_found'
   const researchDebounceRef = useRef(null)
+  const lookupStatusResetRef = useRef(null)
 
   useEffect(() => {
     async function fetchExperiences() {
@@ -415,9 +417,10 @@ export default function Reservations() {
     fetchExperiences()
   }, [])
 
-  // Clear any pending debounce on unmount so it doesn't fire after teardown.
+  // Clear any pending debounce/timeout on unmount so it doesn't fire after teardown.
   useEffect(() => () => {
     if (researchDebounceRef.current) clearTimeout(researchDebounceRef.current)
+    if (lookupStatusResetRef.current) clearTimeout(lookupStatusResetRef.current)
   }, [])
 
   const handleChange = (e) => {
@@ -427,6 +430,8 @@ export default function Reservations() {
       setExistingCustomer(undefined)
       setBirthdayInput('')
       setBirthdaySkipped(false)
+      if (lookupStatusResetRef.current) clearTimeout(lookupStatusResetRef.current)
+      setLookupStatus('idle')
     }
   }
 
@@ -434,6 +439,8 @@ export default function Reservations() {
     const normalised = normalisePhone(form.phone)
     if (!normalised) return
     setForm(prev => ({ ...prev, phone: normalised }))
+    if (lookupStatusResetRef.current) clearTimeout(lookupStatusResetRef.current)
+    setLookupStatus('loading')
     const { data } = await supabaseCustomers
       .from('customers')
       .select('id, full_name, email, birthdate')
@@ -443,10 +450,14 @@ export default function Reservations() {
     if (data) {
       setForm(prev => ({
         ...prev,
-        full_name: prev.full_name || data.full_name || '',
-        email: prev.email || data.email || ''
+        full_name: data.full_name || prev.full_name || '',
+        email: data.email || prev.email || ''
       }))
+      setLookupStatus('found')
+    } else {
+      setLookupStatus('not_found')
     }
+    lookupStatusResetRef.current = setTimeout(() => setLookupStatus('idle'), 2000)
   }
 
   async function runSearch(dateArg, guestsArg) {
@@ -656,6 +667,7 @@ function CopyButton({ text }) {
                 <label className={labelClass}>Guests *</label>
                 <input name="guest_count" type="number" min="1" max="50"
                   value={form.guest_count} onChange={handleGuestsChange} required
+                  disabled={lookupStatus === 'loading'}
                   placeholder="2"
                   className={inputClass} />
               </div>
@@ -663,6 +675,7 @@ function CopyButton({ text }) {
                 <label className={labelClass}>Date *</label>
                 <input name="reservation_date" type="date" value={form.reservation_date}
                   onChange={handleSearchDateChange} required
+                  disabled={lookupStatus === 'loading'}
                   className={inputClass} />
               </div>
             </div>
@@ -720,45 +733,58 @@ function CopyButton({ text }) {
           {selectedSlot && (
             <>
               <div>
+                <label className={labelClass}>Phone Number *</label>
+                <input name="phone" value={form.phone} onChange={handleChange} onBlur={handlePhoneBlur} required
+                  placeholder="+60 12 345 6789"
+                  className={inputClass} />
+                {lookupStatus !== 'idle' && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    {lookupStatus === 'loading' && 'Looking up details...'}
+                    {lookupStatus === 'found' && 'Details found'}
+                    {lookupStatus === 'not_found' && 'No details found'}
+                  </p>
+                )}
+              </div>
+
+              <div>
                 <label className={labelClass}>Full Name *</label>
                 <input name="full_name" value={form.full_name} onChange={handleChange} required
+                  disabled={lookupStatus === 'loading'}
                   placeholder="Your full name"
                   className={inputClass} />
               </div>
 
               <div>
-                <label className={labelClass}>Phone Number *</label>
-                <input name="phone" value={form.phone} onChange={handleChange} onBlur={handlePhoneBlur} required
-                  placeholder="+60 12 345 6789"
-                  className={inputClass} />
-                {existingCustomer && !existingCustomer.birthdate && !birthdaySkipped && (
-                  <div className="mt-3">
-                    <p className="text-xs text-gray-500 mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
-                    <div className="flex items-center gap-4">
-                      <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
-                        className={inputClass} />
-                      <button type="button"
-                        onClick={() => { setBirthdaySkipped(true); setBirthdayInput('') }}
-                        className="text-xs tracking-widest uppercase shrink-0 transition-opacity hover:opacity-70"
-                        style={{ color: BRAND }}>
-                        Skip
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div>
                 <label className={labelClass}>Email</label>
                 <input name="email" type="email" value={form.email} onChange={handleChange}
+                  disabled={lookupStatus === 'loading'}
                   placeholder="your@email.com"
                   className={inputClass} />
               </div>
+
+              {existingCustomer && !existingCustomer.birthdate && !birthdaySkipped && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
+                  <div className="flex items-center gap-4">
+                    <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
+                      disabled={lookupStatus === 'loading'}
+                      className={inputClass} />
+                    <button type="button"
+                      onClick={() => { setBirthdaySkipped(true); setBirthdayInput('') }}
+                      disabled={lookupStatus === 'loading'}
+                      className="text-xs tracking-widest uppercase shrink-0 transition-opacity hover:opacity-70 disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={{ color: BRAND }}>
+                      Skip
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {existingCustomer === null && (
                 <div>
                   <label className={labelClass}>Birthday (optional)</label>
                   <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
+                    disabled={lookupStatus === 'loading'}
                     className={inputClass} />
                   <p className="text-xs text-gray-400 mt-1">We'd love to celebrate with you 🎂</p>
                 </div>
@@ -769,12 +795,14 @@ function CopyButton({ text }) {
                   <label className={labelClass}>Baby Chairs</label>
                   <input name="baby_chairs" type="number" min="0"
                     value={form.baby_chairs} onChange={handleChange}
+                    disabled={lookupStatus === 'loading'}
                     className={inputClass} />
                 </div>
                 <div className="flex items-end pb-3">
                   <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                     <input name="pets" type="checkbox" checked={form.pets} onChange={handleChange}
-                      className="w-4 h-4" />
+                      disabled={lookupStatus === 'loading'}
+                      className="w-4 h-4 disabled:opacity-40 disabled:cursor-not-allowed" />
                     I'm bringing a pet 🐾
                   </label>
                 </div>
@@ -783,11 +811,12 @@ function CopyButton({ text }) {
               <div>
                 <label className={labelClass}>Special Requests</label>
                 <textarea name="notes" value={form.notes} onChange={handleChange} rows={3}
+                  disabled={lookupStatus === 'loading'}
                   placeholder="Dietary requirements, allergies, celebrations..."
                   className={inputClass + ' resize-none'} />
               </div>
 
-              <button type="submit" disabled={loading}
+              <button type="submit" disabled={loading || lookupStatus === 'loading'}
                 className="w-full py-4 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                 style={{ backgroundColor: BRAND }}>
                 {loading ? 'Submitting...' : 'Request Reservation'}

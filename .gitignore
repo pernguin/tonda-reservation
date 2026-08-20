@@ -27,3 +27,5 @@ supabase/.temp
 
 # Local Claude Code dev-server config
 .claude/
+
+.vercel

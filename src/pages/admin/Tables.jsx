@@ -136,6 +136,8 @@ export default function Tables() {
   const [confirmModal, setConfirmModal] = useState(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const [multiSelected, setMultiSelected] = useState([])
+  const [assignTarget, setAssignTarget] = useState(null)
+  const [assignSelected, setAssignSelected] = useState([])
   const [blockFormOpen, setBlockFormOpen] = useState(false)
   const [blockForm, setBlockForm] = useState(emptyBlockForm)
   const svgRef = useRef(null)
@@ -153,6 +155,8 @@ export default function Tables() {
 
   function handleDateInputChange(value) {
     setSelected(null)
+    setAssignTarget(null)
+    setAssignSelected([])
     setDateInputValue(value)
     // A native date input fires onChange once per completed segment (month/
     // day/year), not just once when the whole date is finished — editing an
@@ -232,10 +236,36 @@ export default function Tables() {
     )
   }
 
-  function getUnassignedReservations() {
-    return reservations.filter(r =>
-      !r.table_ids || !Array.isArray(r.table_ids) || r.table_ids.length === 0
-    )
+  function isFullySeated(r) {
+    return getAssignedCapacity(r.id) >= r.guest_count
+  }
+
+  function getAssignableReservations() {
+    return reservations.filter(r => !isFullySeated(r))
+  }
+
+  // Comma-joined table_number(s) for a reservation, or null if unassigned.
+  function getReservationTableLabel(r) {
+    if (!Array.isArray(r.table_ids) || r.table_ids.length === 0) return null
+    const names = r.table_ids
+      .map(id => tables.find(t => t.id === id)?.table_number)
+      .filter(Boolean)
+    return names.length > 0 ? names.join(', ') : null
+  }
+
+  // Fully-seated rows highlight their table the same way clicking the table
+  // directly does. Under-capacity rows (unassigned or partially-assigned)
+  // instead enter assign mode, targeting that reservation for the
+  // multi-table picker below.
+  function onReservationRowClick(r) {
+    if (isFullySeated(r)) {
+      if (Array.isArray(r.table_ids) && r.table_ids.length > 0) {
+        setSelected(r.table_ids[0])
+      }
+      return
+    }
+    setAssignTarget(r)
+    setAssignSelected([])
   }
 
   function getAssignedCapacity(reservationId) {
@@ -247,22 +277,25 @@ export default function Tables() {
     }, 0)
   }
 
-  async function assignTable(tableId, reservationId) {
+  // tableIds is always an array — a single manual pick from the per-table
+  // panel arrives as a 1-element array, a multi-table pick from assign mode
+  // arrives as the whole selection, submitted together in one claim.
+  async function assignTable(tableIds, reservationId) {
     const reservation = reservations.find(r => r.id === reservationId)
-    const tableReservations = getTableReservations(tableId)
+    const tableReservations = tableIds.flatMap(id => getTableReservations(id))
     const conflict = checkTimeConflict(tableReservations, reservation, holdDurationMinutes)
-    const table = tables.find(t => t.id === tableId)
+    const newCapacity = tableIds.reduce((sum, id) => sum + (tables.find(t => t.id === id)?.capacity || 0), 0)
+    const tableWord = tableIds.length > 1 ? 'One of the selected tables' : 'This table'
 
     // Check capacity
     const alreadyAssigned = getAssignedCapacity(reservationId)
-    const tableCapacity = table?.capacity || 0
-    const totalAfterAssign = alreadyAssigned + tableCapacity
+    const totalAfterAssign = alreadyAssigned + newCapacity
     const guestCount = reservation.guest_count
 
     if (conflict.conflict && totalAfterAssign < guestCount) {
       setConfirmModal({
-        message: `This table already has a reservation within 2 hours of ${reservation.reservation_time} AND combined capacity (${totalAfterAssign}) is still below guest count (${guestCount}). Assign anyway?`,
-        onConfirm: () => { doAssign(tableId, reservationId); setConfirmModal(null) },
+        message: `${tableWord} already has a reservation within 2 hours of ${reservation.reservation_time} AND combined capacity (${totalAfterAssign}) is still below guest count (${guestCount}). Assign anyway?`,
+        onConfirm: () => { doAssign(tableIds, reservationId); setConfirmModal(null) },
         onCancel: () => setConfirmModal(null)
       })
       return
@@ -270,8 +303,8 @@ export default function Tables() {
 
     if (conflict.conflict) {
       setConfirmModal({
-        message: `This table already has a reservation within 2 hours of ${reservation.reservation_time}. The previous party may still be dining. Assign anyway?`,
-        onConfirm: () => { doAssign(tableId, reservationId); setConfirmModal(null) },
+        message: `${tableWord} already has a reservation within 2 hours of ${reservation.reservation_time}. The previous party may still be dining. Assign anyway?`,
+        onConfirm: () => { doAssign(tableIds, reservationId); setConfirmModal(null) },
         onCancel: () => setConfirmModal(null)
       })
       return
@@ -279,35 +312,43 @@ export default function Tables() {
 
     if (totalAfterAssign < guestCount) {
       setConfirmModal({
-        message: `After assigning this table, combined capacity will be ${totalAfterAssign} seats but the reservation is for ${guestCount} guests. You may need to assign more tables. Assign anyway?`,
-        onConfirm: () => { doAssign(tableId, reservationId); setConfirmModal(null) },
+        message: `After assigning ${tableIds.length > 1 ? 'these tables' : 'this table'}, combined capacity will be ${totalAfterAssign} seats but the reservation is for ${guestCount} guests. You may need to assign more tables. Assign anyway?`,
+        onConfirm: () => { doAssign(tableIds, reservationId); setConfirmModal(null) },
         onCancel: () => setConfirmModal(null)
       })
       return
     }
 
-    doAssign(tableId, reservationId)
+    doAssign(tableIds, reservationId)
   }
 
-  async function doAssign(tableId, reservationId) {
+  async function doAssign(tableIds, reservationId) {
     const reservation = reservations.find(r => r.id === reservationId)
     const currentIds = Array.isArray(reservation.table_ids) ? reservation.table_ids : []
-    const newIds = currentIds.includes(tableId) ? currentIds : [...currentIds, tableId]
-    await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
-    // Lock the table for holdDurationMinutes from the reservation's own date+time
+    const newIds = [...new Set([...currentIds, ...tableIds])]
+    // Lock the tables for holdDurationMinutes from the reservation's own date+time
     // (explicit y/m/d parsing, same pattern as getDateInfo — not new Date()/today).
     const [h, m] = reservation.reservation_time.split(':').map(Number)
     const [y, mo, d] = reservation.reservation_date.split('-').map(Number)
     const lockFrom = new Date(y, mo - 1, d, h, m, 0, 0)
     const lockUntil = new Date(lockFrom.getTime() + holdDurationMinutes * 60 * 1000)
-    await supabase.rpc('claim_restaurant_tables', {
-      p_table_ids: [tableId],
+    // Claim before writing table_ids, same order as autoAssignTables — a lost
+    // race must never leave reservations.table_ids pointing at an unclaimed table.
+    const { error: claimError } = await supabase.rpc('claim_restaurant_tables', {
+      p_table_ids: tableIds,
       p_reservation_id: reservationId,
       p_reservation_start: lockFrom.toISOString(),
       p_lock_until: lockUntil.toISOString()
     })
+    if (claimError) {
+      console.error('Manual assignment failed: claim lost the race', claimError)
+      return
+    }
+    await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
     await fetchAll()
     setSelected(null)
+    setAssignTarget(null)
+    setAssignSelected([])
   }
 
   async function unassignTable(tableId, reservationId) {
@@ -450,6 +491,18 @@ export default function Tables() {
       )
       return
     }
+    if (assignTarget) {
+      // Tables already assigned to this reservation aren't part of the new
+      // selection — unassigning them is a separate action (the existing
+      // "Unassign" button), not something this picker toggles.
+      if (Array.isArray(assignTarget.table_ids) && assignTarget.table_ids.includes(table.id)) return
+      setAssignSelected(prev =>
+        prev.includes(table.id)
+          ? prev.filter(id => id !== table.id)
+          : [...prev, table.id]
+      )
+      return
+    }
     setBlockFormOpen(false)
     setSelected(selected === table.id ? null : table.id)
   }
@@ -457,8 +510,17 @@ export default function Tables() {
   const selectedTable = tables.find(t => t.id === selected)
   const selectedStatus = selected ? statusByTable.get(selected) : null
   const selectedTableReservations = selected ? getTableReservations(selected) : []
-  const unassigned = getUnassignedReservations()
+  const assignable = getAssignableReservations()
   const todayView = isToday(selectedDate)
+
+  function cancelAssignMode() {
+    setAssignTarget(null)
+    setAssignSelected([])
+  }
+
+  const assignAlreadySeats = assignTarget ? getAssignedCapacity(assignTarget.id) : 0
+  const assignNewSeats = assignSelected.reduce((sum, id) => sum + (tables.find(t => t.id === id)?.capacity || 0), 0)
+  const assignRunningSeats = assignAlreadySeats + assignNewSeats
 
   return (
     <div className="min-h-screen p-4 md:p-6">
@@ -480,7 +542,7 @@ export default function Tables() {
                 className="border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors" />
             </div>
           )}
-          <button onClick={() => { setMode(mode === 'assign' ? 'layout' : 'assign'); setSelected(null); setMultiSelectMode(false); setMultiSelected([]) }}
+          <button onClick={() => { setMode(mode === 'assign' ? 'layout' : 'assign'); setSelected(null); setMultiSelectMode(false); setMultiSelected([]); setAssignTarget(null); setAssignSelected([]) }}
             className="px-3 md:px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700">
             {mode === 'assign' ? '✏️ Edit Layout' : '← Back'}
           </button>
@@ -506,6 +568,10 @@ export default function Tables() {
             onTouchEnd={() => setDragging(null)}
             style={{ cursor: dragging ? 'grabbing' : 'default', display: 'block', touchAction: 'none' }}
           >
+            <style>{`
+              .floor-table-shape { stroke: transparent; stroke-width: 2px; transition: stroke 0.15s ease; }
+              .floor-table-shape:hover { stroke: #ffffff; }
+            `}</style>
             <polygon
               points={FLOOR_POINTS.map(p => p.join(',')).join(' ')}
               fill="#fafaf8" stroke="#333" strokeWidth="1.5"
@@ -526,6 +592,8 @@ export default function Tables() {
               const label = getTableLabel(table, assigned, todayView)
               const isSelected = selected === table.id
               const isMultiSelected = multiSelected.includes(table.id)
+              const isAssignSelected = assignSelected.includes(table.id)
+              const isAssignedToTarget = !!assignTarget && Array.isArray(assignTarget.table_ids) && assignTarget.table_ids.includes(table.id)
 
               const isBarStool = table.table_number?.startsWith('B') && table.table_number !== 'BT'
 
@@ -539,12 +607,15 @@ export default function Tables() {
                   {isBarStool ? (
                     <>
                       <circle
+                        className="floor-table-shape"
                         cx={table.x_position + w / 2}
                         cy={table.y_position + h / 2}
                         r={w / 2}
                         fill={color}
-                        stroke={isMultiSelected ? '#f59e0b' : isSelected ? '#3b82f6' : 'transparent'}
-                        strokeWidth="2"
+                        style={{
+                          stroke: isMultiSelected ? '#f59e0b' : isAssignSelected ? '#0891b2' : isSelected ? '#3b82f6' : isAssignedToTarget ? '#16a34a' : undefined,
+                          strokeWidth: (isMultiSelected || isAssignSelected || isSelected || isAssignedToTarget) ? 2 : undefined
+                        }}
                         opacity="0.9"
                       />
                       <text
@@ -558,11 +629,14 @@ export default function Tables() {
                   ) : (
                     <>
                       <rect
+                        className="floor-table-shape"
                         x={table.x_position} y={table.y_position}
                         width={w} height={h} rx="2"
                         fill={color}
-                        stroke={isMultiSelected ? '#f59e0b' : isSelected ? '#3b82f6' : 'transparent'}
-                        strokeWidth="2"
+                        style={{
+                          stroke: isMultiSelected ? '#f59e0b' : isAssignSelected ? '#0891b2' : isSelected ? '#3b82f6' : isAssignedToTarget ? '#16a34a' : undefined,
+                          strokeWidth: (isMultiSelected || isAssignSelected || isSelected || isAssignedToTarget) ? 2 : undefined
+                        }}
                         opacity="0.9"
                       />
                       <text
@@ -670,22 +744,29 @@ export default function Tables() {
             </>
           )}
 
-          {mode === 'assign' && !selectedTable && (
+          {mode === 'assign' && !selectedTable && !assignTarget && (
             <>
-              <h3 className="font-bold text-base mb-3">Unassigned {todayView ? 'Today' : 'This Date'}</h3>
-              {unassigned.length === 0 ? (
-                <p className="text-gray-400 text-sm">All reservations are assigned.</p>
+              <h3 className="font-bold text-base mb-3">Reservations {todayView ? 'Today' : 'This Date'}</h3>
+              {reservations.length === 0 ? (
+                <p className="text-gray-400 text-sm">No reservations {todayView ? 'today' : 'on this date'}.</p>
               ) : (
-                unassigned.map(r => (
-                  <div key={r.id} className="border border-gray-200 rounded-lg p-3 mb-2">
-                    <p className="font-semibold text-sm">{r.customers?.full_name}{getReservationIcons(r)}</p>
-                    <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                      {r.status}
-                    </span>
-                    <p className="text-xs mt-0.5 text-gray-400">{r.guest_count} seats needed</p>
-                  </div>
-                ))
+                reservations.map(r => {
+                  const tableLabel = getReservationTableLabel(r)
+                  return (
+                    <div key={r.id}
+                      onClick={() => onReservationRowClick(r)}
+                      className="border border-gray-200 rounded-lg p-3 mb-2 transition-colors cursor-pointer hover:border-black">
+                      <p className="font-semibold text-sm">{r.customers?.full_name}{getReservationIcons(r)}</p>
+                      <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                        {r.status}
+                      </span>
+                      <p className="text-xs mt-0.5 font-medium" style={{ color: tableLabel ? '#16a34a' : '#9ca3af' }}>
+                        {tableLabel ? `Table ${tableLabel}` : 'Unassigned'}
+                      </p>
+                    </div>
+                  )
+                })
               )}
               <div className="mt-6 pt-4 border-t border-gray-100">
                 <p className="text-xs text-gray-400 mb-2">Legend</p>
@@ -706,6 +787,37 @@ export default function Tables() {
                 </div>
               </div>
             </>
+          )}
+
+          {mode === 'assign' && !selectedTable && assignTarget && (
+            <div className="space-y-3 mt-1">
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold text-base">Assign Tables</h3>
+                <button onClick={cancelAssignMode} className="text-xs text-gray-400 hover:text-gray-700">
+                  Cancel
+                </button>
+              </div>
+              <div className="border border-gray-200 rounded-lg p-3">
+                <p className="font-semibold text-sm">{assignTarget.customers?.full_name}{getReservationIcons(assignTarget)}</p>
+                <p className="text-xs text-gray-500">{assignTarget.reservation_time} · {assignTarget.guest_count} guests</p>
+              </div>
+              <p className="text-sm font-medium" style={{ color: assignRunningSeats >= assignTarget.guest_count ? '#16a34a' : '#ca8a04' }}>
+                {assignRunningSeats} / {assignTarget.guest_count} seats selected
+              </p>
+              <p className="text-xs text-gray-400">Tap free tables on the floor plan to add them.</p>
+              {assignSelected.length > 0 && (
+                <p className="text-xs text-gray-500">
+                  Adding: {assignSelected.map(id => tables.find(t => t.id === id)?.table_number).filter(Boolean).join(', ')}
+                </p>
+              )}
+              <button
+                disabled={assignSelected.length === 0}
+                onClick={() => assignTable(assignSelected, assignTarget.id)}
+                className="w-full py-2.5 text-xs font-medium tracking-widest uppercase text-white rounded-lg transition-opacity hover:opacity-90 disabled:opacity-40"
+                style={{ backgroundColor: '#E8420A' }}>
+                Confirm Assignment
+              </button>
+            </div>
           )}
 
           {mode === 'assign' && selectedTable && (
@@ -818,13 +930,13 @@ export default function Tables() {
               )}
 
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Assign a Reservation</p>
-              {unassigned.length === 0 ? (
-                <p className="text-gray-400 text-sm">No unassigned reservations {todayView ? 'today' : 'on this date'}.</p>
+              {assignable.length === 0 ? (
+                <p className="text-gray-400 text-sm">All reservations are fully seated {todayView ? 'today' : 'on this date'}.</p>
               ) : (
-                unassigned.map(r => (
+                assignable.map(r => (
                   <div key={r.id}
                     className="border border-gray-200 rounded-lg p-3 mb-2 cursor-pointer hover:border-black transition-colors"
-                    onClick={() => assignTable(selectedTable.id, r.id)}>
+                    onClick={() => assignTable([selectedTable.id], r.id)}>
                     <p className="font-semibold text-sm">{r.customers?.full_name}{getReservationIcons(r)}</p>
                     <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>

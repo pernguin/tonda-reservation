@@ -593,7 +593,14 @@ export default function Tables() {
             <text x={180} y={132} textAnchor="middle" dominantBaseline="central"
               fontSize="6" fill="white" fontWeight="500">Bar Counter</text>
 
-            {tables.map(table => {
+            {(() => {
+              // Recomputed each render from current data, not stored -- a small
+              // ordinal per distinct group_id, only meaningful for telling two
+              // simultaneously-active merge groups apart on the floor plan.
+              const mergedGroupIds = [...new Set(tables.filter(t => t.group_id).map(t => t.group_id))].sort()
+              const groupNumberById = new Map(mergedGroupIds.map((id, i) => [id, i + 1]))
+
+              return tables.map(table => {
               const { w, h } = getTableSize(table)
               const assigned = getTableReservations(table.id)
               const status = statusByTable.get(table.id)
@@ -603,6 +610,8 @@ export default function Tables() {
               const isMultiSelected = multiSelected.includes(table.id)
               const isAssignSelected = assignSelected.includes(table.id)
               const isAssignedToTarget = !!assignTarget && Array.isArray(assignTarget.table_ids) && assignTarget.table_ids.includes(table.id)
+              const isMerged = !!table.group_id
+              const groupNumber = isMerged ? groupNumberById.get(table.group_id) : null
 
               const isBarStool = table.table_number?.startsWith('B') && table.table_number !== 'BT'
 
@@ -622,8 +631,8 @@ export default function Tables() {
                         r={w / 2}
                         fill={color}
                         style={{
-                          stroke: isMultiSelected ? '#f59e0b' : isAssignSelected ? '#0891b2' : isSelected ? '#3b82f6' : isAssignedToTarget ? '#16a34a' : undefined,
-                          strokeWidth: (isMultiSelected || isAssignSelected || isSelected || isAssignedToTarget) ? 2 : undefined
+                          stroke: isMultiSelected ? '#f59e0b' : isAssignSelected ? '#0891b2' : isSelected ? '#3b82f6' : isAssignedToTarget ? '#16a34a' : isMerged ? '#db2777' : undefined,
+                          strokeWidth: (isMultiSelected || isAssignSelected || isSelected || isAssignedToTarget || isMerged) ? 2 : undefined
                         }}
                         opacity="0.9"
                       />
@@ -634,6 +643,23 @@ export default function Tables() {
                         fontSize="4" fill="white" fontWeight="600">
                         {label.line1}
                       </text>
+                      {isMerged && (
+                        <>
+                          <circle
+                            cx={table.x_position + w - 2}
+                            cy={table.y_position + 2}
+                            r="3"
+                            fill="#db2777"
+                          />
+                          <text
+                            x={table.x_position + w - 2}
+                            y={table.y_position + 2}
+                            textAnchor="middle" dominantBaseline="central"
+                            fontSize="3.5" fill="white" fontWeight="700">
+                            {groupNumber}
+                          </text>
+                        </>
+                      )}
                     </>
                   ) : (
                     <>
@@ -643,8 +669,8 @@ export default function Tables() {
                         width={w} height={h} rx="2"
                         fill={color}
                         style={{
-                          stroke: isMultiSelected ? '#f59e0b' : isAssignSelected ? '#0891b2' : isSelected ? '#3b82f6' : isAssignedToTarget ? '#16a34a' : undefined,
-                          strokeWidth: (isMultiSelected || isAssignSelected || isSelected || isAssignedToTarget) ? 2 : undefined
+                          stroke: isMultiSelected ? '#f59e0b' : isAssignSelected ? '#0891b2' : isSelected ? '#3b82f6' : isAssignedToTarget ? '#16a34a' : isMerged ? '#db2777' : undefined,
+                          strokeWidth: (isMultiSelected || isAssignSelected || isSelected || isAssignedToTarget || isMerged) ? 2 : undefined
                         }}
                         opacity="0.9"
                       />
@@ -664,11 +690,29 @@ export default function Tables() {
                           {label.line2}
                         </text>
                       )}
+                      {isMerged && (
+                        <>
+                          <circle
+                            cx={table.x_position + w - 3}
+                            cy={table.y_position + 3}
+                            r="3.5"
+                            fill="#db2777"
+                          />
+                          <text
+                            x={table.x_position + w - 3}
+                            y={table.y_position + 3}
+                            textAnchor="middle" dominantBaseline="central"
+                            fontSize="4" fill="white" fontWeight="700">
+                            {groupNumber}
+                          </text>
+                        </>
+                      )}
                     </>
                   )}
                 </g>
               )
-            })}
+              })
+            })()}
           </svg>
         </div>
 

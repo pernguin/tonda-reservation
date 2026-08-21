@@ -481,7 +481,11 @@ export default function Tables() {
     // compatibility click afterward, double-firing onTableClick and
     // silently cancelling out any toggle-style selection.
     e.preventDefault()
-    if (!dragMoved.current && mode === 'assign') {
+    // Layout mode already suppresses the synthetic click via onTouchStart's
+    // own preventDefault, so dispatching here for a non-drag tap is the only
+    // call onTableClick gets in that mode -- no double-fire risk like assign
+    // mode had.
+    if (!dragMoved.current && (mode === 'assign' || mode === 'layout')) {
       onTableClick(table)
     }
     setDragging(null)

@@ -575,7 +575,7 @@ export default function Tables() {
             onMouseLeave={onMouseUp}
             onTouchMove={onTouchMove}
             onTouchEnd={() => setDragging(null)}
-            style={{ cursor: dragging ? 'grabbing' : 'default', display: 'block', touchAction: 'none' }}
+            style={{ cursor: dragging ? 'grabbing' : 'default', display: 'block', touchAction: mode === 'layout' ? 'none' : 'auto' }}
           >
             <style>{`
               .floor-table-shape { stroke: transparent; stroke-width: 2px; transition: stroke 0.15s ease; }

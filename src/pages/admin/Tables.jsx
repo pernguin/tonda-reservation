@@ -476,6 +476,11 @@ export default function Tables() {
   }
 
   function onTouchEnd(e, table) {
+    // Without this, a tap here (which never calls preventDefault upstream
+    // for non-layout mode) leaves the browser free to synthesize a
+    // compatibility click afterward, double-firing onTableClick and
+    // silently cancelling out any toggle-style selection.
+    e.preventDefault()
     if (!dragMoved.current && mode === 'assign') {
       onTableClick(table)
     }

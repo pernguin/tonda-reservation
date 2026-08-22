@@ -444,15 +444,28 @@ export default function Tables() {
     // generates array-literal syntax that errors against a jsonb column
     // server-side, so this filters client-side instead, same as
     // getTableReservations does everywhere else in this file.
+    // No customers(...) embed -- customer data lives in Round's separate
+    // Supabase project here, not a local FK PostgREST can join, same as
+    // fetchAll() already has to handle.
     const { data: allActive, error: reservationsError } = await supabase
       .from('reservations')
-      .select('id, reservation_date, reservation_time, guest_count, table_ids, customers(full_name)')
+      .select('id, reservation_date, reservation_time, guest_count, table_ids, customer_id')
       .in('status', ['confirmed', 'pending', 'seated'])
       .order('reservation_date', { ascending: true })
     if (reservationsError) { console.error('Failed to check affected reservations:', reservationsError); return }
-    const affectedReservations = (allActive || []).filter(r =>
+    const affectedRaw = (allActive || []).filter(r =>
       Array.isArray(r.table_ids) && r.table_ids.includes(table.id)
     )
+    const affectedCustomerIds = [...new Set(affectedRaw.map(r => r.customer_id).filter(Boolean))]
+    let affectedCustomersById = {}
+    if (affectedCustomerIds.length > 0) {
+      const { data: customersData } = await supabaseCustomers
+        .from('customers')
+        .select('id, full_name')
+        .in('id', affectedCustomerIds)
+      affectedCustomersById = Object.fromEntries((customersData || []).map(c => [c.id, c]))
+    }
+    const affectedReservations = affectedRaw.map(r => ({ ...r, customers: affectedCustomersById[r.customer_id] }))
     // table_blocks.table_id has a real FK to restaurant_tables -- these rows
     // must be cleared or the final delete fails outright, not just a nicety.
     const { data: affectedBlocks, error: blocksError } = await supabase

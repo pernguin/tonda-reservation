@@ -246,15 +246,16 @@ function isTimeWithinSessions(time, sessions) {
   })
 }
 
+async function flagNeedsManualAssignment(reservationId) {
+  const { error } = await supabase
+    .from('reservations')
+    .update({ needs_manual_assignment: true })
+    .eq('id', reservationId)
+  if (error) console.error('Failed to flag reservation for manual assignment', reservationId, error)
+}
+
 async function autoAssignTables(reservationId, reservationDate, reservationTime, guestCount, durationMinutes) {
   try {
-    const { data: allTables } = await supabase
-      .from('restaurant_tables')
-      .select('*')
-      .eq('is_bookable', true)
-
-    if (!allTables || allTables.length === 0) return
-
     const [resH, resM] = reservationTime.split(':').map(Number)
     const resMins = resH * 60 + resM
     const resEnd = resMins + durationMinutes
@@ -265,35 +266,47 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
     const [resYear, resMonth, resDay] = reservationDate.split('-').map(Number)
     const reservationDateTime = new Date(resYear, resMonth - 1, resDay, resH, resM, 0, 0)
 
-    // Filter out locked tables (locked within 2 hours of reservation time).
-    // Compare as full datetimes, not just hour:minute — a lock from a
-    // different day must not read as active at the same clock time today.
-    const availableTables = allTables.filter(table => {
-      if (!table.locked_until) return true
-      return new Date(table.locked_until) <= reservationDateTime
-    })
+    // Re-fetched on every combo retry attempt, not just once up front — after a
+    // lost claim race the set of truly free tables has changed, so a stale
+    // snapshot (even with just the failed tables removed) can't be trusted.
+    async function fetchFreeTables() {
+      const { data: allTables } = await supabase
+        .from('restaurant_tables')
+        .select('*')
+        .eq('is_bookable', true)
+      if (!allTables || allTables.length === 0) return []
 
-    const { data: existingReservations } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('reservation_date', reservationDate)
-      .in('status', ['confirmed', 'pending', 'seated'])
-      .neq('id', reservationId)
+      // Filter out locked tables (locked within 2 hours of reservation time).
+      // Compare as full datetimes, not just hour:minute — a lock from a
+      // different day must not read as active at the same clock time today.
+      const availableTables = allTables.filter(table => {
+        if (!table.locked_until) return true
+        return new Date(table.locked_until) <= reservationDateTime
+      })
 
-    const conflictingTableIds = new Set()
-    for (const r of existingReservations || []) {
-      const [h, m] = r.reservation_time.split(':').map(Number)
-      const existStart = h * 60 + m
-      const existEnd = existStart + durationMinutes
-      const overlaps = resMins < existEnd && resEnd > existStart
-      if (overlaps && Array.isArray(r.table_ids)) {
-        r.table_ids.forEach(id => conflictingTableIds.add(id))
+      const { data: existingReservations } = await supabase
+        .from('reservations')
+        .select('*')
+        .eq('reservation_date', reservationDate)
+        .in('status', ['confirmed', 'pending', 'seated'])
+        .neq('id', reservationId)
+
+      const conflictingTableIds = new Set()
+      for (const r of existingReservations || []) {
+        const [h, m] = r.reservation_time.split(':').map(Number)
+        const existStart = h * 60 + m
+        const existEnd = existStart + durationMinutes
+        const overlaps = resMins < existEnd && resEnd > existStart
+        if (overlaps && Array.isArray(r.table_ids)) {
+          r.table_ids.forEach(id => conflictingTableIds.add(id))
+        }
       }
+
+      return availableTables.filter(t => !conflictingTableIds.has(t.id))
     }
 
-    const freeTables = availableTables.filter(t => !conflictingTableIds.has(t.id))
-
-    if (freeTables.length === 0) return
+    const freeTables = await fetchFreeTables()
+    if (freeTables.length === 0) { await flagNeedsManualAssignment(reservationId); return }
 
     // Try to find a single table with enough capacity first, smallest sufficient
     // table first. The claim is atomic (see claim_restaurant_tables) and can lose
@@ -319,59 +332,73 @@ async function autoAssignTables(reservationId, reservationDate, reservationTime,
         }
       }
       console.error('Auto-assignment failed: all single-table candidates lost the claim race')
+      await flagNeedsManualAssignment(reservationId)
       return
     }
 
-    const sortedTables = [...freeTables].sort((a, b) => a.x_position - b.x_position)
+    // No single table — find best combination using proximity. Combo claims are
+    // all-or-nothing (see claim_restaurant_tables), so a lost race means the
+    // combo just picked is no longer trustworthy — retry with freshly fetched
+    // tables rather than reusing the same (now stale) candidate list.
+    const MAX_COMBO_ATTEMPTS = 3
+    for (let attempt = 1; attempt <= MAX_COMBO_ATTEMPTS; attempt++) {
+      const attemptFreeTables = attempt === 1 ? freeTables : await fetchFreeTables()
+      if (attemptFreeTables.length === 0) continue
 
-    for (let size = 2; size <= Math.min(4, sortedTables.length); size++) {
-      const combinations = getCombinations(sortedTables, size)
-      let bestCombo = null
-      let bestScore = Infinity
+      // Sort tables by position to find clusters
+      const sortedTables = [...attemptFreeTables].sort((a, b) => a.x_position - b.x_position)
 
-      for (const combo of combinations) {
-        const totalCapacity = combo.reduce((sum, t) => sum + t.capacity, 0)
-        if (totalCapacity < guestCount) continue
+      // Try combinations of 2, 3, 4 tables, smallest viable size first
+      for (let size = 2; size <= Math.min(4, sortedTables.length); size++) {
+        const combinations = getCombinations(sortedTables, size)
+        let bestCombo = null
+        let bestScore = Infinity
 
-        let maxDist = 0
-        for (let i = 0; i < combo.length; i++) {
-          for (let j = i + 1; j < combo.length; j++) {
-            const dist = Math.sqrt(
-              Math.pow(combo[i].x_position - combo[j].x_position, 2) +
-              Math.pow(combo[i].y_position - combo[j].y_position, 2)
-            )
-            maxDist = Math.max(maxDist, dist)
+        for (const combo of combinations) {
+          const totalCapacity = combo.reduce((sum, t) => sum + t.capacity, 0)
+          if (totalCapacity < guestCount) continue
+
+          let maxDist = 0
+          for (let i = 0; i < combo.length; i++) {
+            for (let j = i + 1; j < combo.length; j++) {
+              const dist = Math.sqrt(
+                Math.pow(combo[i].x_position - combo[j].x_position, 2) +
+                Math.pow(combo[i].y_position - combo[j].y_position, 2)
+              )
+              maxDist = Math.max(maxDist, dist)
+            }
+          }
+
+          if (maxDist < bestScore) {
+            bestScore = maxDist
+            bestCombo = combo
           }
         }
 
-        if (maxDist < bestScore) {
-          bestScore = maxDist
-          bestCombo = combo
+        if (bestCombo) {
+          const tableIds = bestCombo.map(t => t.id)
+          const lockUntil = new Date(reservationDateTime.getTime() + durationMinutes * 60 * 1000)
+          const { error: claimError } = await supabase.rpc('claim_restaurant_tables', {
+            p_table_ids: tableIds,
+            p_reservation_id: reservationId,
+            p_reservation_start: reservationDateTime.toISOString(),
+            p_lock_until: lockUntil.toISOString()
+          })
+          if (!claimError) {
+            await supabase.from('reservations').update({ table_ids: tableIds }).eq('id', reservationId)
+            return
+          }
+          console.error(`Auto-assignment: combo claim lost the race (attempt ${attempt}/${MAX_COMBO_ATTEMPTS})`, claimError)
+          break
         }
-      }
-
-      if (bestCombo) {
-        const tableIds = bestCombo.map(t => t.id)
-        const lockUntil = new Date(reservationDateTime.getTime() + durationMinutes * 60 * 1000)
-        // Combo claims are all-or-nothing (see claim_restaurant_tables). Unlike
-        // the single-table path, a lost race here isn't retried with a
-        // recomputed combo — rare enough in practice to just log and move on.
-        const { error: claimError } = await supabase.rpc('claim_restaurant_tables', {
-          p_table_ids: tableIds,
-          p_reservation_id: reservationId,
-          p_reservation_start: reservationDateTime.toISOString(),
-          p_lock_until: lockUntil.toISOString()
-        })
-        if (claimError) {
-          console.error('Auto-assignment failed: combo claim lost the race', claimError)
-          return
-        }
-        await supabase.from('reservations').update({ table_ids: tableIds }).eq('id', reservationId)
-        return
       }
     }
+
+    console.error('Auto-assignment failed: exhausted all combo retry attempts')
+    await flagNeedsManualAssignment(reservationId)
   } catch (err) {
     console.error('Auto-assignment failed:', err)
+    await flagNeedsManualAssignment(reservationId).catch(() => {})
   }
 }
 

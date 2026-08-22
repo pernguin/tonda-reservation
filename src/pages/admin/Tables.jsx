@@ -355,7 +355,7 @@ export default function Tables() {
       showToast('This table was just claimed by another reservation — pick a different one or refresh.')
       return
     }
-    await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
+    await supabase.from('reservations').update({ table_ids: newIds, needs_manual_assignment: false }).eq('id', reservationId)
     await fetchAll()
     setSelected(null)
     setAssignTarget(null)
@@ -1013,6 +1013,11 @@ export default function Tables() {
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
                         {r.status}
                       </span>
+                      {r.needs_manual_assignment && (
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium mt-1 ml-1 inline-block bg-amber-100 text-amber-700">
+                          ⚠️ Needs Table
+                        </span>
+                      )}
                       <p className="text-xs mt-0.5 font-medium" style={{ color: tableLabel ? '#16a34a' : '#9ca3af' }}>
                         {tableLabel ? `Table ${tableLabel}` : 'Unassigned'}
                       </p>

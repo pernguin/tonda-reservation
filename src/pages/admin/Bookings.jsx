@@ -220,7 +220,12 @@ export default function Bookings() {
             {tableNums || ''}
           </div>
           {/* Status */}
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-1.5">
+            {r.needs_manual_assignment && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700" title="Auto-assignment couldn't find a table — assign one manually">
+                ⚠️ Needs Table
+              </span>
+            )}
             <StatusBadge status={r.status} />
           </div>
         </div>
@@ -234,6 +239,9 @@ export default function Bookings() {
             {r.baby_chairs > 0 && <p className="text-xs text-gray-500 mb-1">🍼 Baby Chairs: {r.baby_chairs}</p>}
             {r.pets && <p className="text-xs text-gray-500 mb-1">🐾 Pets: Yes</p>}
             {tableNums && <p className="text-xs text-gray-500 mb-2">🪑 {tableNums}</p>}
+            {r.needs_manual_assignment && (
+              <p className="text-xs text-amber-700 mb-2">⚠️ Auto-assignment couldn't secure a table for this booking — assign one manually below.</p>
+            )}
             <ActionButtons table="reservations" id={r.id} />
           </div>
         )}

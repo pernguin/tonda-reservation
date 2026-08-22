@@ -619,11 +619,15 @@ export default function Tables() {
 
   function onTableClick(table) {
     if (multiSelectMode) {
-      setMultiSelected(prev =>
-        prev.includes(table.id)
-          ? prev.filter(id => id !== table.id)
-          : [...prev, table.id]
-      )
+      setMultiSelected(prev => {
+        if (prev.includes(table.id)) return prev.filter(id => id !== table.id)
+        // Already part of a different group -- adding it here would silently
+        // overwrite its group_id, orphaning whichever table(s) it leaves
+        // behind in that old group. Must be unmerged first (via the
+        // single-table panel) before it can join a new one.
+        if (table.group_id) return prev
+        return [...prev, table.id]
+      })
       return
     }
     if (assignTarget) {

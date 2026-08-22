@@ -140,6 +140,10 @@ export default function Tables() {
   const [assignSelected, setAssignSelected] = useState([])
   const [blockFormOpen, setBlockFormOpen] = useState(false)
   const [blockForm, setBlockForm] = useState(emptyBlockForm)
+  const [newTableFormOpen, setNewTableFormOpen] = useState(false)
+  const [newTableForm, setNewTableForm] = useState({ table_number: '', capacity: '2' })
+  const [deleteTableConfirm, setDeleteTableConfirm] = useState(null)
+  const [explodingTableId, setExplodingTableId] = useState(null)
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
@@ -399,6 +403,115 @@ export default function Tables() {
     await fetchAll()
   }
 
+  async function createTable() {
+    const name = newTableForm.table_number.trim()
+    if (!name) return
+    const capacity = parseInt(newTableForm.capacity) || 1
+
+    const insertRow = async () => {
+      await supabase.from('restaurant_tables').insert({
+        table_number: name,
+        capacity,
+        x_position: 250,
+        y_position: 250,
+        is_bookable: true,
+        rotated: false,
+        is_temporary: true
+      })
+      setNewTableFormOpen(false)
+      setNewTableForm({ table_number: '', capacity: '2' })
+      await fetchAll()
+    }
+
+    // Soft warning only -- table_number has no uniqueness constraint and
+    // duplicates already exist elsewhere in this data, so this isn't a hard
+    // block, just a heads-up to avoid confusing an already-existing name.
+    if (tables.some(t => t.table_number === name)) {
+      setConfirmModal({
+        message: `A table named "${name}" already exists. Create another one with the same name anyway?`,
+        onConfirm: () => { insertRow(); setConfirmModal(null) },
+        onCancel: () => setConfirmModal(null)
+      })
+      return
+    }
+    await insertRow()
+  }
+
+  // Cross-date, active-status only -- staff need to know about a booking
+  // next week, not just whatever date happens to be selected right now.
+  async function openDeleteTableConfirm(table) {
+    // table_ids is stored as jsonb, not a native Postgres array -- .contains()
+    // generates array-literal syntax that errors against a jsonb column
+    // server-side, so this filters client-side instead, same as
+    // getTableReservations does everywhere else in this file.
+    const { data: allActive, error: reservationsError } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, reservation_time, guest_count, table_ids, customers(full_name)')
+      .in('status', ['confirmed', 'pending', 'seated'])
+      .order('reservation_date', { ascending: true })
+    if (reservationsError) { console.error('Failed to check affected reservations:', reservationsError); return }
+    const affectedReservations = (allActive || []).filter(r =>
+      Array.isArray(r.table_ids) && r.table_ids.includes(table.id)
+    )
+    // table_blocks.table_id has a real FK to restaurant_tables -- these rows
+    // must be cleared or the final delete fails outright, not just a nicety.
+    const { data: affectedBlocks, error: blocksError } = await supabase
+      .from('table_blocks')
+      .select('id, block_date, reason')
+      .eq('table_id', table.id)
+      .order('block_date', { ascending: true })
+    if (blocksError) { console.error('Failed to check affected blocks:', blocksError); return }
+    setDeleteTableConfirm({ table, affectedReservations, affectedBlocks: affectedBlocks || [] })
+  }
+
+  async function confirmDeleteTable() {
+    const { table, affectedReservations } = deleteTableConfirm
+    // Close the dialog and play the explosion on the floor plan first, then
+    // do the actual writes once the animation's had time to finish -- purely
+    // cosmetic, doesn't change any of the cleanup logic below. The animation
+    // holds its last frame (scale 0) once done, so explodingTableId must
+    // clear even on failure below, or a table that didn't actually get
+    // deleted would stay invisible -- hence the try/finally.
+    setDeleteTableConfirm(null)
+    setExplodingTableId(table.id)
+    await new Promise(resolve => setTimeout(resolve, 350))
+
+    try {
+      // Each step below must actually succeed before the next runs -- a
+      // table getting deleted while an unassign silently failed would leave
+      // exactly the kind of dangling table_ids reference this whole confirm
+      // flow exists to prevent. Abort rather than plow ahead on a failure.
+      for (const r of affectedReservations) {
+        const newIds = r.table_ids.filter(id => id !== table.id)
+        const { error } = await supabase.from('reservations').update({ table_ids: newIds }).eq('id', r.id)
+        if (error) { console.error('Failed to unassign reservation', r.id, error); return }
+      }
+      if (table.group_id) {
+        // Disbands the merge -- the other member(s) physically still exist
+        // and keep their own reservation assignments, only this table goes away.
+        const { error: groupError } = await supabase.from('restaurant_tables')
+          .update({ group_id: null, locked_until: null, locked_by_reservation: null })
+          .eq('group_id', table.group_id)
+        if (groupError) { console.error('Failed to disband group', table.group_id, groupError); return }
+        const { error: deleteGroupError } = await supabase.from('table_groups').delete().eq('id', table.group_id)
+        if (deleteGroupError) { console.error('Failed to delete table_groups row', table.group_id, deleteGroupError); return }
+      } else {
+        const { error } = await supabase.from('restaurant_tables')
+          .update({ locked_until: null, locked_by_reservation: null })
+          .eq('id', table.id)
+        if (error) { console.error('Failed to release lock on', table.id, error); return }
+      }
+      const { error: blocksError } = await supabase.from('table_blocks').delete().eq('table_id', table.id)
+      if (blocksError) { console.error('Failed to delete table_blocks for', table.id, blocksError); return }
+      const { error: deleteError } = await supabase.from('restaurant_tables').delete().eq('id', table.id)
+      if (deleteError) { console.error('Failed to delete table', table.id, deleteError); return }
+      setSelected(null)
+    } finally {
+      setExplodingTableId(null)
+      await fetchAll()
+    }
+  }
+
   async function submitBlockForm(e) {
     e.preventDefault()
     const { error } = await supabase.from('table_blocks').insert([{
@@ -580,6 +693,12 @@ export default function Tables() {
             <style>{`
               .floor-table-shape { stroke: transparent; stroke-width: 2px; transition: stroke 0.15s ease; }
               .floor-table-shape:hover { stroke: #ffffff; }
+              @keyframes tableExplode {
+                0% { transform: scale(1); opacity: 1; }
+                50% { transform: scale(1.4); opacity: 0.7; }
+                100% { transform: scale(0); opacity: 0; }
+              }
+              .table-exploding { transform-box: fill-box; transform-origin: center; animation: tableExplode 350ms ease-in forwards; }
             `}</style>
             <polygon
               points={FLOOR_POINTS.map(p => p.join(',')).join(' ')}
@@ -612,11 +731,13 @@ export default function Tables() {
               const isAssignedToTarget = !!assignTarget && Array.isArray(assignTarget.table_ids) && assignTarget.table_ids.includes(table.id)
               const isMerged = !!table.group_id
               const groupNumber = isMerged ? groupNumberById.get(table.group_id) : null
+              const isExploding = explodingTableId === table.id
 
               const isBarStool = table.table_number?.startsWith('B') && table.table_number !== 'BT'
 
               return (
                 <g key={table.id}
+                  className={isExploding ? 'table-exploding' : undefined}
                   onClick={() => onTableClick(table)}
                   onMouseDown={e => onMouseDown(e, table)}
                   onTouchStart={e => onTouchStart(e, table)}
@@ -709,6 +830,16 @@ export default function Tables() {
                       )}
                     </>
                   )}
+                  {isExploding && (
+                    <text
+                      x={table.x_position + w / 2}
+                      y={table.y_position + h / 2}
+                      textAnchor="middle" dominantBaseline="central"
+                      fontSize="14"
+                      style={{ pointerEvents: 'none' }}>
+                      💥
+                    </text>
+                  )}
                 </g>
               )
               })
@@ -718,17 +849,54 @@ export default function Tables() {
 
         <div className="w-full md:w-[45%] border border-gray-200 rounded-xl p-4 md:p-5 overflow-y-auto max-h-[500px] md:max-h-[600px]">
 
-          {mode === 'layout' && !selectedTable && !multiSelectMode && (
+          {mode === 'layout' && !selectedTable && !multiSelectMode && !newTableFormOpen && (
             <div className="space-y-4 mt-4">
               <button
                 onClick={() => { setMultiSelectMode(true); setMultiSelected([]) }}
                 className="w-full py-2 text-xs font-medium tracking-widest uppercase border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
                 Select Multiple to Merge
               </button>
+              <button
+                onClick={() => setNewTableFormOpen(true)}
+                className="w-full py-2 text-xs font-medium tracking-widest uppercase border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
+                New Table
+              </button>
               <div className="text-gray-400 text-sm text-center mt-4">
                 <p>Drag tables to reposition.</p>
                 <p className="mt-1">Click a table to edit it.</p>
               </div>
+            </div>
+          )}
+
+          {mode === 'layout' && newTableFormOpen && (
+            <div className="space-y-3 mt-4">
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold text-base">New Table</h3>
+                <button
+                  onClick={() => { setNewTableFormOpen(false); setNewTableForm({ table_number: '', capacity: '2' }) }}
+                  className="text-xs text-gray-400 hover:text-gray-700">
+                  Cancel
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">
+                Creates a temporary table for overflow seating -- placed at a default spot, drag it into place after. Delete it later once no longer needed.
+              </p>
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Table Name</p>
+              <input type="text" value={newTableForm.table_number}
+                onChange={e => setNewTableForm(f => ({ ...f, table_number: e.target.value }))}
+                placeholder="e.g. Overflow 1"
+                className="w-full border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 mb-4" />
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Capacity</p>
+              <input type="number" min="1" value={newTableForm.capacity}
+                onChange={e => setNewTableForm(f => ({ ...f, capacity: e.target.value }))}
+                className="w-full border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 mb-4" />
+              <button
+                disabled={!newTableForm.table_number.trim()}
+                onClick={createTable}
+                className="w-full py-2.5 text-xs font-medium tracking-widest uppercase text-white rounded-lg transition-opacity hover:opacity-90 disabled:opacity-40"
+                style={{ backgroundColor: '#E8420A' }}>
+                Create Table
+              </button>
             </div>
           )}
 
@@ -794,6 +962,13 @@ export default function Tables() {
                 className="w-full py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700">
                 {selectedTable.rotated ? '↕ Set Vertical' : '↔ Set Horizontal'}
               </button>
+              {selectedTable.is_temporary && (
+                <button
+                  onClick={() => openDeleteTableConfirm(selectedTable)}
+                  className="w-full py-2 mt-4 text-xs font-medium tracking-widest uppercase border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                  Delete Table
+                </button>
+              )}
             </>
           )}
 
@@ -1023,6 +1198,53 @@ export default function Tables() {
               <button onClick={confirmModal.onConfirm}
                 className="flex-1 py-2 rounded-lg bg-black text-white text-sm font-medium hover:bg-gray-800">
                 Assign Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTableConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl max-h-[80vh] overflow-y-auto">
+            <h3 className="font-bold text-lg mb-2">Delete {deleteTableConfirm.table.table_number}?</h3>
+            {deleteTableConfirm.affectedReservations.length === 0 && deleteTableConfirm.affectedBlocks.length === 0 ? (
+              <p className="text-gray-600 text-sm mb-6">No reservations or blocks are currently assigned to this table.</p>
+            ) : (
+              <>
+                <p className="text-gray-600 text-sm mb-3">This will unassign the following before deleting:</p>
+                {deleteTableConfirm.affectedReservations.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Reservations</p>
+                    {deleteTableConfirm.affectedReservations.map(r => (
+                      <div key={r.id} className="border border-gray-200 rounded-lg p-2 mb-2 text-sm">
+                        <p className="font-medium">{r.customers?.full_name || 'Unknown'}</p>
+                        <p className="text-xs text-gray-500">{formatDisplayDate(r.reservation_date)} · {r.reservation_time} · {r.guest_count} guests</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {deleteTableConfirm.affectedBlocks.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Blocks</p>
+                    {deleteTableConfirm.affectedBlocks.map(b => (
+                      <div key={b.id} className="border border-gray-200 rounded-lg p-2 mb-2 text-sm">
+                        <p className="font-medium">{formatDisplayDate(b.block_date)}</p>
+                        {b.reason && <p className="text-xs text-gray-500">{b.reason}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+            <div className="flex gap-3 mt-2">
+              <button onClick={() => setDeleteTableConfirm(null)}
+                className="flex-1 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={confirmDeleteTable}
+                className="flex-1 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700">
+                Delete
               </button>
             </div>
           </div>

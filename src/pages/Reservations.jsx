@@ -586,24 +586,24 @@ export default function Reservations() {
         birthdate: !birthdaySkipped ? birthdayInput : null
       })
 
-      const autoConfirm = availability.autoConfirm && !availability.manualOnly
       const { data: booking, error: bookingError } = await supabase
-        .from('reservations')
-        .insert([{
-          customer_id: customerId,
-          reservation_date: form.reservation_date,
-          reservation_time: form.reservation_time,
-          guest_count: parseInt(form.guest_count),
-          notes: form.notes,
-          baby_chairs: parseInt(form.baby_chairs) || 0,
-          pets: form.pets,
-          status: autoConfirm ? 'confirmed' : 'pending',
-          table_type: availability.type,
-          tables_count: availability.count
-        }])
-        .select()
+        .rpc('create_reservation_atomic', {
+          p_reservation_date: form.reservation_date,
+          p_reservation_time: form.reservation_time,
+          p_day_type: info.day_type,
+          p_guest_count: parseInt(form.guest_count),
+          p_customer_id: customerId,
+          p_notes: form.notes,
+          p_baby_chairs: parseInt(form.baby_chairs) || 0,
+          p_pets: form.pets
+        })
         .single()
-      if (bookingError) throw bookingError
+      if (bookingError) {
+        const friendly = bookingError.message?.match(/^\w+: (.+)$/)
+        setError(friendly ? friendly[1] : 'Something went wrong. Please try again.')
+        setLoading(false)
+        return
+      }
       setBookingId(booking.id)
       setConfirmedBooking({ time: form.reservation_time, durationMinutes })
       autoAssignTables(booking.id, form.reservation_date, form.reservation_time, parseInt(form.guest_count), durationMinutes)

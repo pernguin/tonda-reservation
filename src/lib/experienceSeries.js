@@ -51,19 +51,25 @@ function nthWeekdayDateInMonth(year, month, weekday, nth) {
   return toDateString(new Date(year, month - 1, day))
 }
 
-// Generates the dates for a recurring series. `occurrences` is the TOTAL row
-// count (including the first/template one). Monthly occurrences that would
-// land on a nth-weekday the target month doesn't have are omitted, not
-// silently shifted — callers should surface `skipped` to the admin.
-export function generateSeriesDates({ startDate, endDate, cadence, interval, occurrences }) {
+// Generates the dates for a recurring series, stopping once the next date
+// would exceed `repeatUntil` (inclusive). Monthly occurrences that would land
+// on a nth-weekday the target month doesn't have are omitted, not silently
+// shifted — callers should surface `skipped` to the admin. The month/week
+// cursor always advances by a fixed step regardless of a skip, so this is
+// guaranteed to terminate in a bounded number of steps for any finite
+// repeatUntil — no iteration cap needed.
+export function generateSeriesDates({ startDate, endDate, cadence, interval, repeatUntil }) {
   const spanDays = endDate ? daysBetween(startDate, endDate) : 0
   const dates = []
   const skipped = []
 
   if (cadence === 'weekly') {
-    for (let n = 0; n < occurrences; n++) {
+    let n = 0
+    while (true) {
       const date = n === 0 ? startDate : addDays(startDate, n * interval * 7)
+      if (date > repeatUntil) break
       dates.push({ date, endDate: spanDays > 0 ? addDays(date, spanDays) : null })
+      n++
     }
     return { dates, skipped }
   }
@@ -75,20 +81,27 @@ export function generateSeriesDates({ startDate, endDate, cadence, interval, occ
   const startYear = start.getFullYear()
   const startMonth = start.getMonth() + 1
 
-  for (let n = 0; n < occurrences; n++) {
+  let n = 0
+  while (true) {
+    let date
     if (n === 0) {
-      dates.push({ date: startDate, endDate: spanDays > 0 ? addDays(startDate, spanDays) : null })
-      continue
+      date = startDate
+    } else {
+      const totalMonths = (startMonth - 1) + n * interval
+      const targetYear = startYear + Math.floor(totalMonths / 12)
+      const targetMonth = (totalMonths % 12) + 1
+      const monthStart = toDateString(new Date(targetYear, targetMonth - 1, 1))
+      if (monthStart > repeatUntil) break
+      date = nthWeekdayDateInMonth(targetYear, targetMonth, weekday, nth)
+      if (!date) {
+        skipped.push(`${MONTH_NAMES[targetMonth - 1]} ${targetYear} doesn't have a ${ORDINALS[nth] || `${nth}th`} ${WEEKDAY_NAMES[weekday]}`)
+        n++
+        continue
+      }
     }
-    const totalMonths = (startMonth - 1) + n * interval
-    const targetYear = startYear + Math.floor(totalMonths / 12)
-    const targetMonth = (totalMonths % 12) + 1
-    const date = nthWeekdayDateInMonth(targetYear, targetMonth, weekday, nth)
-    if (!date) {
-      skipped.push(`${MONTH_NAMES[targetMonth - 1]} ${targetYear} doesn't have a ${ORDINALS[nth] || `${nth}th`} ${WEEKDAY_NAMES[weekday]}`)
-      continue
-    }
+    if (date > repeatUntil) break
     dates.push({ date, endDate: spanDays > 0 ? addDays(date, spanDays) : null })
+    n++
   }
 
   return { dates, skipped }

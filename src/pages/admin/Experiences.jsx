@@ -11,7 +11,7 @@ const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
 const emptyForm = {
   name: '', date: '', time: '', end_date: '', end_time: '',
   description: '', price: '', poster_url: '', status: 'draft',
-  recurring: false, cadence: 'weekly', interval: '1', occurrences: ''
+  recurring: false, cadence: 'weekly', interval: '1', repeat_until: ''
 }
 
 function buildBlockRows(exp, tableId, registrationId) {
@@ -50,6 +50,8 @@ export default function Experiences() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
+  const [editingExp, setEditingExp] = useState(null)
+  const [editScope, setEditScope] = useState('single')
   const [form, setForm] = useState(emptyForm)
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -115,6 +117,8 @@ export default function Experiences() {
   function openNewForm() {
     setForm(emptyForm)
     setEditingId(null)
+    setEditingExp(null)
+    setEditScope('single')
     setShowForm(true)
     setViewingRegs(null)
     setPosterError(null)
@@ -132,9 +136,11 @@ export default function Experiences() {
       price: exp.price ?? '',
       poster_url: exp.poster_url || '',
       status: exp.status,
-      recurring: false, cadence: 'weekly', interval: '1', occurrences: ''
+      recurring: false, cadence: 'weekly', interval: '1', repeat_until: ''
     })
     setEditingId(exp.id)
+    setEditingExp(exp)
+    setEditScope('single')
     setShowForm(true)
     setViewingRegs(null)
     setPosterError(null)
@@ -156,7 +162,14 @@ export default function Experiences() {
       status: form.status
     }
 
-    if (editingId) {
+    if (editingId && editScope === 'future' && editingExp?.series_id) {
+      const ok = await updateFutureOccurrences(editingExp.series_id, basePayload)
+      setSaving(false)
+      if (!ok) return
+      setShowForm(false)
+      fetchAll()
+      return
+    } else if (editingId) {
       await supabase.from('experiences').update({
         ...basePayload,
         date: form.date,
@@ -168,7 +181,7 @@ export default function Experiences() {
         endDate: form.end_date || null,
         cadence: form.cadence,
         interval: parseInt(form.interval) || 1,
-        occurrences: parseInt(form.occurrences) || 1
+        repeatUntil: form.repeat_until
       })
       const seriesId = crypto.randomUUID()
       const rows = dates.map(d => ({
@@ -243,6 +256,43 @@ export default function Experiences() {
     fetchAll()
   }
 
+  // Bulk-updates name/time/end_time/description/price/poster_url/status across
+  // every future occurrence in the series. Deliberately excludes date/end_date
+  // (occurrence placement stays per-row) and overwrites unconditionally — a
+  // previously individually-edited future occurrence gets overwritten too,
+  // same tradeoff deleteRemainingOccurrences already makes for deletes.
+  async function updateFutureOccurrences(seriesId, payload) {
+    const today = getLocalToday()
+    const { data: futureExps } = await supabase
+      .from('experiences')
+      .select('id')
+      .eq('series_id', seriesId)
+      .gte('date', today)
+    const expIds = (futureExps || []).map(e => e.id)
+    if (expIds.length === 0) { alert('No future occurrences to update.'); return false }
+
+    const { data: regs } = await supabase
+      .from('experience_registrations')
+      .select('experience_id')
+      .in('experience_id', expIds)
+    const occurrencesWithRegs = new Set((regs || []).map(r => r.experience_id)).size
+
+    let message = `Update ${expIds.length} remaining occurrence${expIds.length > 1 ? 's' : ''} in this series?`
+    if (occurrencesWithRegs > 0) {
+      message += ` ${occurrencesWithRegs} of these occurrences already have registrations — they'll see the updated details.`
+    }
+    if (!confirm(message)) return false
+
+    const { error } = await supabase.from('experiences').update(payload).in('id', expIds)
+    if (error) {
+      console.error('Failed to update series:', error)
+      setSeriesNotice(`Failed to update series: ${error.message}`)
+      return false
+    }
+    setSeriesNotice(`Updated ${expIds.length} occurrence${expIds.length > 1 ? 's' : ''} in this series.`)
+    return true
+  }
+
   async function computeSpanFreeTableIds(exp) {
     const dates = exp.end_date && exp.end_date !== exp.date ? dateRange(exp.date, exp.end_date) : [exp.date]
     const statusLists = await Promise.all(dates.map(d => getTableStatusForDate(d)))
@@ -307,6 +357,7 @@ export default function Experiences() {
   const today = getLocalToday()
   const upcoming = experiences.filter(e => e.date >= today)
   const past = experiences.filter(e => e.date < today)
+  const canEditFuture = !!(editingExp?.series_id && editingExp.date >= today)
 
   function formatPrice(price) {
     return price == null ? 'Free' : `RM ${Number(price).toFixed(2)}`
@@ -407,7 +458,8 @@ export default function Experiences() {
             <div>
               <label className={labelClass}>Date *</label>
               <input name="date" type="date" value={form.date} onChange={handleChange} required
-                className={inputClass} />
+                disabled={editScope === 'future'}
+                className={inputClass + (editScope === 'future' ? ' opacity-40 cursor-not-allowed' : '')} />
             </div>
             <div>
               <label className={labelClass}>Time *</label>
@@ -421,7 +473,8 @@ export default function Experiences() {
               <label className={labelClass}>End Date (optional)</label>
               <input name="end_date" type="date" value={form.end_date} onChange={handleChange}
                 min={form.date || undefined}
-                className={inputClass} />
+                disabled={editScope === 'future'}
+                className={inputClass + (editScope === 'future' ? ' opacity-40 cursor-not-allowed' : '')} />
             </div>
             <div>
               <label className={labelClass}>End Time (optional)</label>
@@ -429,6 +482,24 @@ export default function Experiences() {
                 className={inputClass} />
             </div>
           </div>
+
+          {canEditFuture && (
+            <div className="border-t border-gray-100 pt-6">
+              <label className={labelClass}>Apply changes to</label>
+              <div className="flex gap-6 mt-2">
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="radio" name="editScope" value="single" checked={editScope === 'single'}
+                    onChange={() => setEditScope('single')} className="w-4 h-4" />
+                  This occurrence only
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="radio" name="editScope" value="future" checked={editScope === 'future'}
+                    onChange={() => setEditScope('future')} className="w-4 h-4" />
+                  This and all future occurrences
+                </label>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className={labelClass}>Description</label>
@@ -492,8 +563,9 @@ export default function Experiences() {
                       className={inputClass} />
                   </div>
                   <div>
-                    <label className={labelClass}>Number of Occurrences</label>
-                    <input name="occurrences" type="number" min="1" value={form.occurrences} onChange={handleChange}
+                    <label className={labelClass}>Repeat Until</label>
+                    <input name="repeat_until" type="date" value={form.repeat_until} onChange={handleChange}
+                      min={form.date || undefined}
                       required={form.recurring}
                       className={inputClass} />
                   </div>
@@ -506,7 +578,7 @@ export default function Experiences() {
             <button type="submit" disabled={saving || uploading}
               className="px-8 py-3 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
               style={{ backgroundColor: BRAND }}>
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? 'Saving...' : editScope === 'future' ? 'Update Series' : 'Save'}
             </button>
             <button type="button" onClick={() => setShowForm(false)}
               className="px-8 py-3 text-sm font-medium tracking-widest uppercase text-gray-400 hover:text-gray-600 transition-colors">

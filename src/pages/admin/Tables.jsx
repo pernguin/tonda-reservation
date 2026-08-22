@@ -144,6 +144,7 @@ export default function Tables() {
   const [newTableForm, setNewTableForm] = useState({ table_number: '', capacity: '2' })
   const [deleteTableConfirm, setDeleteTableConfirm] = useState(null)
   const [explodingTableId, setExplodingTableId] = useState(null)
+  const [toast, setToast] = useState('')
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
@@ -326,6 +327,11 @@ export default function Tables() {
     doAssign(tableIds, reservationId)
   }
 
+  function showToast(msg) {
+    setToast(msg)
+    setTimeout(() => setToast(''), 2500)
+  }
+
   async function doAssign(tableIds, reservationId) {
     const reservation = reservations.find(r => r.id === reservationId)
     const currentIds = Array.isArray(reservation.table_ids) ? reservation.table_ids : []
@@ -346,6 +352,7 @@ export default function Tables() {
     })
     if (claimError) {
       console.error('Manual assignment failed: claim lost the race', claimError)
+      showToast('This table was just claimed by another reservation — pick a different one or refresh.')
       return
     }
     await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
@@ -1265,6 +1272,12 @@ export default function Tables() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full z-50 shadow-lg">
+          {toast}
         </div>
       )}
     </div>

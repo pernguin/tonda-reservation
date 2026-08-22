@@ -1000,7 +1000,7 @@ export default function Tables() {
                   return (
                     <div key={r.id}
                       onClick={() => onReservationRowClick(r)}
-                      className="border border-gray-200 rounded-lg p-3 mb-2 transition-colors cursor-pointer hover:border-black">
+                      className={`border border-gray-200 rounded-lg p-3 mb-2 transition-colors cursor-pointer hover:border-black ${isFullySeated(r) ? 'opacity-50' : ''}`}>
                       <p className="font-semibold text-sm">{r.customers?.full_name}{getReservationIcons(r)}</p>
                       <p className="text-xs text-gray-500">{r.reservation_time} · {r.guest_count} guests</p>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${r.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>

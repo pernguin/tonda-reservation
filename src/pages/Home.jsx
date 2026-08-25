@@ -24,7 +24,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex" style={{ height: '100vh', overflow: 'hidden' }}>
+    <div className="flex" style={{ minHeight: '100vh' }}>
 
       {/* Left side */}
       <div className="w-full md:w-1/2 flex flex-col h-full"

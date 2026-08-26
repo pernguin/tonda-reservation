@@ -1,1 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@1,900&family=Work+Sans:wght@400;600&display=swap');
 @import "tailwindcss";
+
+/*
+ * Tonda brand tokens — mirrored from round-tonda-site/themes/tonda.css
+ * (color + font only; that file defines no spacing tokens). Scoped to
+ * public-facing pages only; /admin is intentionally left unstyled by these.
+ */
+:root {
+  --color-bg: #fbf6f2;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef3f7;
+  --color-text: #221a16;
+  --color-text-2: #5c4a40;
+  --color-text-muted: #7a6860;
+  --color-border: #b3a598;
+  --color-accent: #e8420a;
+  --color-accent-contrast: #ffffff;
+  --color-accent-pressed: #a52e08;
+  --color-accent-tint: #fde7dc;
+  --color-focus-ring: #1a5f8a;
+
+  --color-header-bg: #003e74;
+  --color-header-text: #ffffff;
+  --color-footer-bg: #003e74;
+  --color-footer-text: #cfe0ee;
+  --color-footer-link: #ff9a68;
+  --color-footer-card-bg: #0d3f66;
+  --color-footer-card-border: #1e5a86;
+
+  --font-heading: "Libre Franklin", "Trebuchet MS", sans-serif;
+  --font-heading-style: italic;
+  --font-weight-heading: 900;
+  --font-body: "Work Sans", system-ui, sans-serif;
+  --font-weight-body: 400;
+}

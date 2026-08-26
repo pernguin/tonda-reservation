@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { supabase } from '../supabase'
 import { findOrCreateCustomer } from '../supabaseCustomers'
 
-const BRAND = '#E8420A'
-const CREAM = '#FFFFFF'
-const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400"
-const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
-const selectClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors"
+const BRAND = 'var(--color-accent)'
+const CREAM = 'var(--color-bg)'
+const inputClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors placeholder-[var(--color-text-muted)]"
+const labelClass = "block text-xs tracking-widest uppercase mb-1 text-[var(--color-text-2)]"
+const selectClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
 
 export default function Events() {
   const [form, setForm] = useState({
@@ -77,7 +77,7 @@ export default function Events() {
   if (submitted) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-8"
-        style={{ backgroundColor: CREAM }}>
+        style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
         <div className="text-center max-w-md">
           <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"
             style={{ backgroundColor: BRAND }}>
@@ -85,8 +85,8 @@ export default function Events() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-2xl font-light mb-3" style={{ color: BRAND }}>Enquiry Received</h2>
-          <p className="text-gray-500 text-sm leading-relaxed mb-8">{confirmationMessage}</p>
+          <h2 className="text-2xl mb-3" style={{ color: BRAND, fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>Enquiry Received</h2>
+          <p className="text-[var(--color-text-2)] text-sm leading-relaxed mb-8">{confirmationMessage}</p>
           <a href="/"
             className="text-xs tracking-widest uppercase transition-colors"
             style={{ color: BRAND }}>
@@ -98,18 +98,18 @@ export default function Events() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
+    <div className="min-h-screen" style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
       <div className="max-w-lg mx-auto px-8 py-16">
 
         <p className="text-xs tracking-widest uppercase mb-2" style={{ color: BRAND }}>
           Tonda Pizza Romana
         </p>
-        <h1 className="text-3xl font-light text-gray-900 mb-2">Book an Event</h1>
-        <p className="text-gray-400 text-sm mb-12">Tell us about your event and we'll get back to you to confirm details.</p>
+        <h1 className="text-3xl mb-2" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>Book an Event</h1>
+        <p className="text-[var(--color-text-muted)] text-sm mb-12">Tell us about your event and we'll get back to you to confirm details.</p>
 
         {error && (
           <div className="border-l-2 pl-4 mb-8 py-2" style={{ borderColor: BRAND }}>
-            <p className="text-sm text-gray-700">{error}</p>
+            <p className="text-sm text-[var(--color-text-2)]">{error}</p>
           </div>
         )}
 

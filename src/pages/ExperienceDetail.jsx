@@ -3,11 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers } from '../supabaseCustomers'
 
-const BRAND = '#E8420A'
-const CREAM = '#FFFFFF'
+const BRAND = 'var(--color-accent)'
+const CREAM = 'var(--color-bg)'
 
-const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400"
-const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
+const inputClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors placeholder-[var(--color-text-muted)]"
+const labelClass = "block text-xs tracking-widest uppercase mb-1 text-[var(--color-text-2)]"
 
 function normalisePhone(raw) {
   let p = raw.replace(/[\s\-\(\)]/g, '')
@@ -81,7 +81,7 @@ export default function ExperienceDetail() {
   if (experience === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CREAM }}>
-        <p className="text-gray-400 text-sm">Loading...</p>
+        <p className="text-[var(--color-text-muted)] text-sm">Loading...</p>
       </div>
     )
   }
@@ -89,7 +89,7 @@ export default function ExperienceDetail() {
   if (experience === null) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-8" style={{ backgroundColor: CREAM }}>
-        <p className="text-gray-500 text-sm mb-6">This experience could not be found.</p>
+        <p className="text-[var(--color-text-2)] text-sm mb-6">This experience could not be found.</p>
         <button onClick={() => navigate('/reservations')}
           className="text-xs tracking-widest uppercase transition-colors" style={{ color: BRAND }}>
           ← Back to Reservations
@@ -99,7 +99,7 @@ export default function ExperienceDetail() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
+    <div className="min-h-screen" style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
       <div className="max-w-lg mx-auto px-8 py-16">
         <button onClick={() => navigate('/reservations')}
           className="text-xs tracking-widest uppercase mb-8 transition-colors" style={{ color: BRAND }}>
@@ -107,7 +107,7 @@ export default function ExperienceDetail() {
         </button>
 
         {experience.poster_url && (
-          <div className="w-full aspect-square rounded-xl overflow-hidden mb-8 bg-gray-100">
+          <div className="w-full aspect-square rounded-xl overflow-hidden mb-8 bg-[var(--color-surface-2)]">
             <img src={experience.poster_url} alt={experience.name} className="w-full h-full object-cover" />
           </div>
         )}
@@ -115,19 +115,19 @@ export default function ExperienceDetail() {
         <p className="text-xs tracking-widest uppercase mb-2" style={{ color: BRAND }}>
           Tonda Pizza Romana
         </p>
-        <h1 className="text-3xl font-light text-gray-900 mb-2">{experience.name}</h1>
-        <p className="text-gray-500 text-sm mb-1">
+        <h1 className="text-3xl mb-2" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>{experience.name}</h1>
+        <p className="text-[var(--color-text-2)] text-sm mb-1">
           {experience.date} · {experience.time?.slice(0, 5)}
         </p>
         <p className="text-sm font-medium mb-6" style={{ color: BRAND }}>{formatPrice(experience.price)}</p>
 
         {experience.description && (
-          <p className="text-gray-600 text-sm leading-relaxed mb-10 whitespace-pre-line">{experience.description}</p>
+          <p className="text-[var(--color-text-2)] text-sm leading-relaxed mb-10 whitespace-pre-line">{experience.description}</p>
         )}
 
         {submitted ? (
-          <div className="border border-gray-200 rounded-xl p-6" style={{ backgroundColor: 'white' }}>
-            <p className="text-sm text-gray-700">
+          <div className="border border-[var(--color-border)] rounded-xl p-6" style={{ backgroundColor: 'var(--color-surface)' }}>
+            <p className="text-sm text-[var(--color-text-2)]">
               Thanks — your interest has been registered. We'll be in touch with more details closer to the date.
             </p>
           </div>
@@ -135,7 +135,7 @@ export default function ExperienceDetail() {
           <form onSubmit={handleSubmit} className="space-y-8">
             {error && (
               <div className="border-l-2 pl-4 py-2" style={{ borderColor: BRAND }}>
-                <p className="text-sm text-gray-700">{error}</p>
+                <p className="text-sm text-[var(--color-text-2)]">{error}</p>
               </div>
             )}
             <div>

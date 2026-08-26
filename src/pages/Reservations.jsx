@@ -412,8 +412,8 @@ function getCombinations(arr, size) {
   return result
 }
 
-const BRAND = '#E8420A'
-const CREAM = '#FFFFFF'
+const BRAND = 'var(--color-accent)'
+const CREAM = 'var(--color-bg)'
 
 function normalisePhone(raw) {
   let p = raw.replace(/[\s\-\(\)]/g, '')
@@ -422,8 +422,8 @@ function normalisePhone(raw) {
   return p
 }
 
-const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400 disabled:opacity-40 disabled:cursor-not-allowed"
-const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
+const inputClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors placeholder-[var(--color-text-muted)] disabled:opacity-40 disabled:cursor-not-allowed"
+const labelClass = "block text-xs tracking-widest uppercase mb-1 text-[var(--color-text-2)]"
 
 export default function Reservations() {
   const navigate = useNavigate()
@@ -663,7 +663,7 @@ function CopyButton({ text }) {
     const manageUrl = `${window.location.origin}/booking/${bookingId}`
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-8"
-        style={{ backgroundColor: CREAM }}>
+        style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
         <div className="text-center max-w-md">
           <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"
             style={{ backgroundColor: '#16a34a' }}>
@@ -671,19 +671,19 @@ function CopyButton({ text }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-2xl font-light mb-3" style={{ color: BRAND }}>Request Received</h2>
+          <h2 className="text-2xl mb-3" style={{ color: BRAND, fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>Request Received</h2>
           {confirmedBooking && (
-            <p className="text-sm font-medium text-gray-700 mb-2">
+            <p className="text-sm font-medium text-[var(--color-text-2)] mb-2">
               {formatTimeRange(confirmedBooking.time, confirmedBooking.durationMinutes)}
             </p>
           )}
-          <p className="text-gray-500 text-sm leading-relaxed mb-6">{confirmationMessage}</p>
-          <div className="border border-gray-200 rounded-xl p-4 mb-8 text-left"
-            style={{ backgroundColor: 'white' }}>
-            <p className="text-xs tracking-widest uppercase text-gray-400 mb-2">Manage your booking</p>
-            <p className="text-xs text-gray-500 mb-3">Save this link to view or cancel your reservation:</p>
+          <p className="text-[var(--color-text-2)] text-sm leading-relaxed mb-6">{confirmationMessage}</p>
+          <div className="border border-[var(--color-border)] rounded-xl p-4 mb-8 text-left"
+            style={{ backgroundColor: 'var(--color-surface)' }}>
+            <p className="text-xs tracking-widest uppercase text-[var(--color-text-muted)] mb-2">Manage your booking</p>
+            <p className="text-xs text-[var(--color-text-2)] mb-3">Save this link to view or cancel your reservation:</p>
             <div className="flex items-center gap-2">
-              <p className="text-xs text-gray-700 break-all flex-1">{manageUrl}</p>
+              <p className="text-xs text-[var(--color-text-2)] break-all flex-1">{manageUrl}</p>
               <CopyButton text={manageUrl} />
             </div>
           </div>
@@ -700,25 +700,25 @@ function CopyButton({ text }) {
   const hasExperiences = experiences.length > 0
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
+    <div className="min-h-screen" style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
       <div className={`max-w-[900px] mx-auto px-8 py-16 flex flex-col gap-12 ${hasExperiences ? 'md:flex-row md:items-start' : ''}`}>
       <div className={hasExperiences ? 'w-full md:w-[65%]' : 'w-full max-w-lg mx-auto'}>
 
         <p className="text-xs tracking-widest uppercase mb-2" style={{ color: BRAND }}>
           Tonda Pizza Romana
         </p>
-        <h1 className="text-3xl font-light text-gray-900 mb-2">Make a Reservation</h1>
-        <p className="text-gray-400 text-sm mb-12">Search for a time, then fill in your details to request a booking.</p>
+        <h1 className="text-3xl mb-2" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>Make a Reservation</h1>
+        <p className="text-[var(--color-text-muted)] text-sm mb-12">Search for a time, then fill in your details to request a booking.</p>
 
         {error && (
           <div className="border-l-2 pl-4 mb-8 py-2" style={{ borderColor: BRAND }}>
-            <p className="text-sm text-gray-700">{error}</p>
+            <p className="text-sm text-[var(--color-text-2)]">{error}</p>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-8">
 
-          <div className="border border-gray-200 rounded-xl p-4" style={{ backgroundColor: 'white' }}>
+          <div className="border border-[var(--color-border)] rounded-xl p-4" style={{ backgroundColor: 'var(--color-surface)' }}>
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className={labelClass}>Guests *</label>
@@ -749,8 +749,8 @@ function CopyButton({ text }) {
           )}
 
           {hasSearched && !searchLoading && !searchError && availableGroups.length === 0 && (
-            <div className="border border-gray-200 rounded-lg p-6 text-center">
-              <p className="text-sm text-gray-500">No availability for this date. Please try a different date or guest count.</p>
+            <div className="border border-[var(--color-border)] rounded-lg p-6 text-center">
+              <p className="text-sm text-[var(--color-text-2)]">No availability for this date. Please try a different date or guest count.</p>
             </div>
           )}
 
@@ -761,7 +761,7 @@ function CopyButton({ text }) {
                 {availableGroups.map((group, i) => (
                   <div key={group.sessionLabel || i}>
                     {group.sessionLabel && (
-                      <p className="text-xs text-gray-400 mb-2">{group.sessionLabel}</p>
+                      <p className="text-xs text-[var(--color-text-muted)] mb-2">{group.sessionLabel}</p>
                     )}
                     <div className="flex flex-wrap gap-2">
                       {group.slots.map(slot => {
@@ -772,7 +772,7 @@ function CopyButton({ text }) {
                             className="px-4 py-2 rounded-full text-sm font-medium border transition-colors"
                             style={isSelected
                               ? { backgroundColor: BRAND, color: 'white', borderColor: BRAND }
-                              : { backgroundColor: 'white', color: '#374151', borderColor: '#d1d5db' }}>
+                              : { backgroundColor: 'var(--color-surface)', color: 'var(--color-text-2)', borderColor: 'var(--color-border)' }}>
                             {slot.label}
                           </button>
                         )
@@ -781,7 +781,7 @@ function CopyButton({ text }) {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 mt-4">
+              <p className="text-xs text-[var(--color-text-muted)] mt-4">
                 Tables are held for {formatDuration(searchDurationMinutes)} from your reservation time. Please arrive on time — we may release your table to walk-ins if you're significantly late.
               </p>
             </div>
@@ -795,7 +795,7 @@ function CopyButton({ text }) {
                   placeholder="+60 12 345 6789"
                   className={inputClass} />
                 {lookupStatus !== 'idle' && (
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-[var(--color-text-2)] mt-2">
                     {lookupStatus === 'loading' && 'Looking up details...'}
                     {lookupStatus === 'found' && 'Details found'}
                     {lookupStatus === 'not_found' && 'No details found'}
@@ -821,7 +821,7 @@ function CopyButton({ text }) {
 
               {existingCustomer && !existingCustomer.birthdate && !birthdaySkipped && (
                 <div>
-                  <p className="text-xs text-gray-500 mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
+                  <p className="text-xs text-[var(--color-text-2)] mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
                   <div className="flex items-center gap-4">
                     <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
                       disabled={lookupStatus === 'loading'}
@@ -843,7 +843,7 @@ function CopyButton({ text }) {
                   <input type="date" value={birthdayInput} onChange={e => setBirthdayInput(e.target.value)}
                     disabled={lookupStatus === 'loading'}
                     className={inputClass} />
-                  <p className="text-xs text-gray-400 mt-1">We'd love to celebrate with you 🎂</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">We'd love to celebrate with you 🎂</p>
                 </div>
               )}
 
@@ -856,7 +856,7 @@ function CopyButton({ text }) {
                     className={inputClass} />
                 </div>
                 <div className="flex items-end pb-3">
-                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <label className="flex items-center gap-2 text-sm text-[var(--color-text-2)] cursor-pointer">
                     <input name="pets" type="checkbox" checked={form.pets} onChange={handleChange}
                       disabled={lookupStatus === 'loading'}
                       className="w-4 h-4 disabled:opacity-40 disabled:cursor-not-allowed" />
@@ -891,14 +891,14 @@ function CopyButton({ text }) {
                 <div key={exp.id}
                   onClick={() => navigate(`/experiences/${exp.id}`)}
                   className="cursor-pointer group">
-                  <div className="w-full aspect-square rounded-lg bg-gray-100 overflow-hidden mb-2">
+                  <div className="w-full aspect-square rounded-lg bg-[var(--color-surface-2)] overflow-hidden mb-2">
                     {exp.poster_url
                       ? <img src={exp.poster_url} alt={exp.name} className="w-full h-full object-cover transition-opacity group-hover:opacity-80" />
-                      : <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">No image</div>}
+                      : <div className="w-full h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">No image</div>}
                   </div>
-                  <p className="text-sm font-medium text-gray-900 truncate">{exp.name}</p>
-                  <p className="text-xs text-gray-400">{exp.date} · {exp.time?.slice(0, 5)}</p>
-                  <p className="text-xs text-gray-400">{exp.price == null ? 'Free' : `RM ${Number(exp.price).toFixed(2)}`}</p>
+                  <p className="text-sm font-medium text-[var(--color-text)] truncate">{exp.name}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{exp.date} · {exp.time?.slice(0, 5)}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{exp.price == null ? 'Free' : `RM ${Number(exp.price).toFixed(2)}`}</p>
                 </div>
               ))}
             </div>

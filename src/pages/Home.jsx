@@ -27,7 +27,7 @@ export default function Home() {
     <div className="flex" style={{ minHeight: '100vh', fontFamily: 'var(--font-body)' }}>
 
       {/* Left side */}
-      <div className="w-full md:w-1/2 flex flex-col h-full"
+      <div className="w-full md:w-1/2 flex flex-col"
         style={{ backgroundColor: 'var(--color-bg)' }}>
 
         {/* Top bar */}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { useNavigate } from 'react-router-dom'
 import logoBg from '../assets/Logo_2.png'
-import hero from '../assets/Pork_Pepperoni.jpeg'
+import hero from '../assets/reservations-hero.jpg'
 
 export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
@@ -103,7 +103,7 @@ export default function Home() {
       <div className="hidden md:block md:w-1/2 relative overflow-hidden">
         <img
           src={hero}
-          alt="Pepperoni Pizza"
+          alt="Guests dining at Tonda in the evening"
           className="absolute inset-0 w-full h-full object-cover"
         />
       </div>

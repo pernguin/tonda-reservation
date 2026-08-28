@@ -21,6 +21,16 @@ export function normalisePhone(raw) {
   return p
 }
 
+// Mirrors the customers.phone CHECK constraint (customers_phone_format_check,
+// on the shared Round Supabase project) — client and DB must reject the same
+// set of values, or a client-accepted number can still fail at insert with a
+// raw 23514 constraint-violation error instead of a friendly message.
+const PHONE_PATTERN = /^\+?[0-9]{8,15}$/
+
+export function isValidPhone(normalisedPhone) {
+  return PHONE_PATTERN.test(normalisedPhone)
+}
+
 async function findCustomerByPhone(phone) {
   if (!phone || phone === PLACEHOLDER_PHONE) return null
   const { data, error } = await supabaseCustomers
@@ -60,6 +70,9 @@ async function patchCustomer(id, patch) {
 
 export async function findOrCreateCustomer({ full_name, phone, email, birthdate }) {
   const normalisedPhone = normalisePhone(phone)
+  if (!isValidPhone(normalisedPhone)) {
+    throw new Error('Please enter a valid phone number.')
+  }
   const incoming = { full_name, phone: normalisedPhone, email: email || null, birthdate: birthdate || null }
 
   let existing = await findCustomerByPhone(normalisedPhone)

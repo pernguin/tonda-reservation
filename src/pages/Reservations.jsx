@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
-import { supabaseCustomers, findOrCreateCustomer } from '../supabaseCustomers'
+import { supabaseCustomers, findOrCreateCustomer, isValidPhone } from '../supabaseCustomers'
 
 async function getDateInfo(date) {
   const dateObj = new Date(date)
@@ -605,6 +605,10 @@ export default function Reservations() {
 
       const availability = await checkAvailability(form.reservation_date, form.reservation_time, parseInt(form.guest_count), durationMinutes)
       if (!availability.available) { setError(availability.reason); setLoading(false); return }
+
+      if (!isValidPhone(normalisePhone(form.phone))) {
+        setError('Please enter a valid phone number.'); setLoading(false); return
+      }
 
       const customerId = await findOrCreateCustomer({
         full_name: form.full_name,

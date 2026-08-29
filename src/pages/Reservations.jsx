@@ -714,12 +714,6 @@ function CopyButton({ text }) {
         <h1 className="text-3xl mb-2" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>Make a Reservation</h1>
         <p className="text-[var(--color-text-muted)] text-sm mb-12">Search for a time, then fill in your details to request a booking.</p>
 
-        {error && (
-          <div className="border-l-2 pl-4 mb-8 py-2" style={{ borderColor: BRAND }}>
-            <p className="text-sm text-[var(--color-text-2)]">{error}</p>
-          </div>
-        )}
-
         <form onSubmit={handleSubmit} className="space-y-8">
 
           <div className="border border-[var(--color-border)] rounded-xl p-4" style={{ backgroundColor: 'var(--color-surface)' }}>
@@ -876,6 +870,12 @@ function CopyButton({ text }) {
                   placeholder="Dietary requirements, allergies, celebrations..."
                   className={inputClass + ' resize-none'} />
               </div>
+
+              {error && (
+                <div className="border-l-2 pl-4 py-2" style={{ borderColor: BRAND }}>
+                  <p className="text-sm text-[var(--color-text-2)]">{error}</p>
+                </div>
+              )}
 
               <button type="submit" disabled={loading || lookupStatus === 'loading'}
                 className="w-full py-4 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"

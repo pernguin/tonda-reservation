@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "dev",
-      "runtimeExecutable": "C:\\Users\\limyi\\Projects\\tonda-reservation\\.claude\\dev-with-node.cmd",
+      "runtimeExecutable": ".\\.claude\\dev-with-node.cmd",
       "runtimeArgs": [],
       "port": 5173,
       "autoPort": true

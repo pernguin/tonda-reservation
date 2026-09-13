@@ -21,7 +21,7 @@ export default function AdminNav({ unseenCount = 0, soundOn = false, onToggleSou
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-4 py-3 text-xs tracking-widest uppercase font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-600 transition-colors"
+              className="px-4 py-3 text-xs tracking-widest uppercase font-medium border-b-2 shrink-0 border-transparent text-gray-400 hover:text-gray-600 transition-colors"
             >
               {label}
             </a>

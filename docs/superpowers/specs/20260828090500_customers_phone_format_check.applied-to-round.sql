@@ -1,3 +1,5 @@
+-- Moved out of supabase/migrations on 2026-09-14: applied to Round's project via
+-- `db query`, never to Tonda.
 -- ============================================================================
 -- TARGETS A DIFFERENT PROJECT THAN THIS REPO IS LINKED TO. READ BEFORE ACTING.
 --

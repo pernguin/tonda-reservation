@@ -2,6 +2,15 @@ import { supabase } from '../supabase'
 
 const ACTIVE_RESERVATION_STATUSES = ['confirmed', 'pending', 'seated']
 
+export const ARRIVING_SOON_MINUTES = 30
+
+// Parses 'HH:MM' or 'HH:MM:SS' into minutes since local midnight. null/undefined -> null.
+export function timeToMinutes(hhmm) {
+  if (hhmm == null) return null
+  const [h, m] = hhmm.split(':')
+  return Number(h) * 60 + Number(m)
+}
+
 export function getLocalToday() {
   const d = new Date()
   const year = d.getFullYear()
@@ -33,7 +42,7 @@ function statusRecord(tableId, status, block) {
 // same rows twice. `tables` need at least {id, is_bookable, locked_until};
 // `reservations` need at least {table_ids, status}; `blocks` need at least
 // {id, table_id, reason, source_type, source_id}.
-export function computeTableStatus({ dateString, tables, reservations, blocks }) {
+export function computeTableStatus({ dateString, tables, reservations, blocks, atMinutes, holdMinutes }) {
   const today = isToday(dateString)
 
   const reservationsByTable = new Map()
@@ -46,20 +55,50 @@ export function computeTableStatus({ dateString, tables, reservations, blocks })
     }
   }
 
-  const blockByTable = new Map()
+  const blocksByTable = new Map()
   for (const b of blocks || []) {
-    if (!blockByTable.has(b.table_id)) blockByTable.set(b.table_id, b)
+    const list = blocksByTable.get(b.table_id) || []
+    list.push(b)
+    blocksByTable.set(b.table_id, list)
   }
 
   const now = new Date()
+  const hold = holdMinutes ?? 120
 
   return (tables || []).map(table => {
     if (!table.is_bookable) return statusRecord(table.id, 'blocked', null)
 
-    const block = blockByTable.get(table.id)
-    if (block) return statusRecord(table.id, 'blocked', block)
-
+    const tableBlocks = blocksByTable.get(table.id) || []
     const assigned = reservationsByTable.get(table.id) || []
+
+    if (typeof atMinutes === 'number') {
+      const block = tableBlocks.find(b => {
+        const start = timeToMinutes(b.start_time) ?? 0
+        const end = timeToMinutes(b.end_time) ?? 24 * 60
+        return start <= atMinutes && atMinutes < end
+      })
+      if (block) return statusRecord(table.id, 'blocked', block)
+
+      if (assigned.some(r => r.status === 'seated')) {
+        return statusRecord(table.id, 'seated', null)
+      }
+      const occupied = assigned.some(r => {
+        const start = timeToMinutes(r.reservation_time)
+        return start != null && start <= atMinutes && atMinutes < start + hold
+      })
+      if (occupied) return statusRecord(table.id, 'occupied', null)
+
+      const arriving = assigned.some(r => {
+        const start = timeToMinutes(r.reservation_time)
+        return start != null && atMinutes < start && start <= atMinutes + ARRIVING_SOON_MINUTES
+      })
+      if (arriving) return statusRecord(table.id, 'arriving', null)
+
+      return statusRecord(table.id, 'free', null)
+    }
+
+    const block = tableBlocks[0]
+    if (block) return statusRecord(table.id, 'blocked', block)
 
     if (today) {
       if (table.locked_until && new Date(table.locked_until) > now) {

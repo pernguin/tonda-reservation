@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
 import { getTableStatusForDate, getLocalToday } from '../../lib/tableAvailability'
 import { generateSeriesDates, dateRange } from '../../lib/experienceSeries'
-
-const BRAND = '#8B1A1A'
+import AdminPage from '../../components/admin/AdminPage'
+import StatusBadge from '../../components/admin/StatusBadge'
+import { Loading, EmptyState } from '../../components/admin/States'
+import { BRAND } from '../../lib/adminTheme'
 
 const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400"
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
@@ -368,16 +370,6 @@ export default function Experiences() {
     return exp.date
   }
 
-  function StatusBadge({ status }) {
-    return (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-        status === 'published' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-      }`}>
-        {status}
-      </span>
-    )
-  }
-
   function ExperienceRow({ exp }) {
     return (
       <div className="flex items-center gap-4 py-3 border-b border-gray-100">
@@ -420,19 +412,14 @@ export default function Experiences() {
   }
 
   return (
-    <div className="min-h-screen bg-white p-8 max-w-3xl mx-auto">
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <p className="text-xs tracking-widest uppercase mb-1" style={{ color: BRAND }}>Admin</p>
-          <h1 className="text-3xl font-light text-gray-900">Experiences</h1>
-        </div>
+    <AdminPage width="3xl" title="Experiences" headerGap="6"
+      actions={
         <button onClick={openNewForm}
           className="px-6 py-3 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90"
           style={{ backgroundColor: BRAND }}>
           New Experience
         </button>
-      </div>
-
+      }>
       {seriesNotice && (
         <div className="border-l-2 pl-4 mb-8 py-2 flex justify-between items-start gap-4" style={{ borderColor: BRAND }}>
           <p className="text-sm text-gray-700">{seriesNotice}</p>
@@ -666,9 +653,9 @@ export default function Experiences() {
       )}
 
       {loading ? (
-        <p className="text-gray-400 text-sm">Loading...</p>
+        <Loading />
       ) : experiences.length === 0 ? (
-        <p className="text-gray-400 text-sm text-center py-10">No experiences yet.</p>
+        <EmptyState message="No experiences yet." />
       ) : (
         <>
           {upcoming.length > 0 && (
@@ -685,6 +672,6 @@ export default function Experiences() {
           )}
         </>
       )}
-    </div>
+    </AdminPage>
   )
 }

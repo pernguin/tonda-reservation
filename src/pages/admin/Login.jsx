@@ -2,9 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../../supabase'
 import { useNavigate } from 'react-router-dom'
 import logo from '../../assets/Logo_2.png'
-
-const BRAND = '#E8420A'
-const CREAM = '#FFFFFF'
+import { BRAND, CREAM } from '../../lib/adminTheme'
 
 export default function Login() {
   const [email, setEmail] = useState('')

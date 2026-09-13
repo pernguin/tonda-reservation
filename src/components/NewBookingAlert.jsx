@@ -4,8 +4,7 @@ import AdminNav from './AdminNav'
 import { useReservationInserts } from '../lib/useReservationInserts'
 import { useChime } from '../lib/useChime'
 import { describeBooking } from '../lib/bookingSummary'
-
-const BRAND = '#E8420A'
+import { BRAND } from '../lib/adminTheme'
 
 // Owns the "new reservation" queue for the admin shell and renders the nav + banner.
 export default function NewBookingAlert() {

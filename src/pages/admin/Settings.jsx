@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabase'
+import AdminPage from '../../components/admin/AdminPage'
+import SaveButton from '../../components/admin/SaveButton'
+import { Loading } from '../../components/admin/States'
+import { useSavedFlash } from '../../lib/useSavedFlash'
 
-const BRAND = '#E8420A'
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
 
 export default function Settings() {
@@ -11,7 +14,7 @@ export default function Settings() {
     confirmation_message_offsite: '',
     staff_alert_email: ''
   })
-  const [saved, setSaved] = useState(false)
+  const [saved, flashSaved] = useSavedFlash()
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { fetchSettings() }, [])
@@ -30,27 +33,14 @@ export default function Settings() {
     for (const [key, value] of Object.entries(messages)) {
       await supabase.from('settings').upsert({ key, value }, { onConflict: 'key' })
     }
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    flashSaved()
   }
 
-  if (loading) return <div className="p-8 text-gray-400 text-sm">Loading...</div>
+  if (loading) return <AdminPage width="2xl" title="Settings" subtitle="Manage confirmation messages and staff alerts" headerGap="10"><Loading /></AdminPage>
 
   return (
-    <div className="min-h-screen bg-white p-8 max-w-2xl mx-auto">
-      <div className="flex justify-between items-start mb-10">
-        <div>
-          <p className="text-xs tracking-widest uppercase mb-1" style={{ color: BRAND }}>Admin</p>
-          <h1 className="text-3xl font-light text-gray-900">Settings</h1>
-          <p className="text-gray-400 text-sm mt-1">Manage confirmation messages and staff alerts</p>
-        </div>
-        <button onClick={saveAll}
-          className="px-8 py-3 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90"
-          style={{ backgroundColor: saved ? '#16a34a' : BRAND }}>
-          {saved ? '✓ Saved' : 'Save All'}
-        </button>
-      </div>
-
+    <AdminPage width="2xl" title="Settings" subtitle="Manage confirmation messages and staff alerts" headerGap="10"
+      actions={<SaveButton saved={saved} onClick={saveAll} />}>
       <div className="space-y-10">
         <div>
           <p className="text-lg font-medium text-gray-900 mb-1">Reservation Confirmation</p>
@@ -101,6 +91,6 @@ export default function Settings() {
           />
         </div>
       </div>
-    </div>
+    </AdminPage>
   )
 }

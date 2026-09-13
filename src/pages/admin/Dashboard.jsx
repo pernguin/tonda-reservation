@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
 import { Link } from 'react-router-dom'
-
-const BRAND = '#E8420A'
+import AdminPage from '../../components/admin/AdminPage'
+import { BRAND } from '../../lib/adminTheme'
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -43,11 +43,7 @@ export default function Dashboard() {
   ]
 
   return (
-    <div className="min-h-screen bg-white p-8 max-w-3xl mx-auto">
-      <p className="text-xs tracking-widest uppercase mb-1" style={{ color: BRAND }}>Admin</p>
-      <h1 className="text-3xl font-light text-gray-900 mb-1">Dashboard</h1>
-      <p className="text-gray-400 text-sm mb-10">Overview of all bookings and enquiries</p>
-
+    <AdminPage width="3xl" title="Dashboard" subtitle="Overview of all bookings and enquiries" headerGap="10">
       <div className="grid grid-cols-2 gap-4 mb-10">
         {stats_cards.map(card => (
           <Link to={card.link} key={card.label}
@@ -69,6 +65,6 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
-    </div>
+    </AdminPage>
   )
 }

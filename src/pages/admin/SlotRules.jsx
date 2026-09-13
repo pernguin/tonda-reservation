@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../supabase'
+import AdminPage from '../../components/admin/AdminPage'
+import SaveButton from '../../components/admin/SaveButton'
+import { Loading } from '../../components/admin/States'
+import { useSavedFlash } from '../../lib/useSavedFlash'
+import { BRAND } from '../../lib/adminTheme'
 
-const BRAND = '#E8420A'
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
 
 const DEFAULT_CONFIG = [
@@ -47,7 +51,7 @@ export default function SlotRules() {
   const [newBlackoutEnd, setNewBlackoutEnd] = useState('')
   const [newBlackoutReason, setNewBlackoutReason] = useState('')
   const [loading, setLoading] = useState(true)
-  const [saved, setSaved] = useState(false)
+  const [saved, flashSaved] = useSavedFlash()
 
   useEffect(() => { fetchAll() }, [])
 
@@ -92,8 +96,7 @@ export default function SlotRules() {
         await supabase.from('operating_hours').insert({ day_type: c.day_type, is_closed: false, closed_days: c.closed_days, sessions: c.sessions })
       }
     }
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    flashSaved()
   }
 
   function updateRuleType(day_type, rule_type) {
@@ -178,24 +181,11 @@ export default function SlotRules() {
   const inputClass = "border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors"
   const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-400"
 
-  if (loading) return <div className="p-8 text-gray-400 text-sm">Loading...</div>
+  if (loading) return <AdminPage width="2xl" title="Reservation Config" subtitle="Manage booking rules, sessions and date controls" headerGap="10"><Loading /></AdminPage>
 
   return (
-    <div className="min-h-screen bg-white p-8 max-w-2xl mx-auto">
-
-      {/* Header */}
-      <div className="flex justify-between items-start mb-10">
-        <div>
-          <p className="text-xs tracking-widest uppercase mb-1" style={{ color: BRAND }}>Admin</p>
-          <h1 className="text-3xl font-light text-gray-900">Reservation Config</h1>
-          <p className="text-gray-400 text-sm mt-1">Manage booking rules, sessions and date controls</p>
-        </div>
-        <button onClick={saveAll}
-          className="px-8 py-3 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90"
-          style={{ backgroundColor: saved ? '#16a34a' : BRAND }}>
-          {saved ? '✓ Saved' : 'Save All'}
-        </button>
-      </div>
+    <AdminPage width="2xl" title="Reservation Config" subtitle="Manage booking rules, sessions and date controls" headerGap="10"
+      actions={<SaveButton saved={saved} onClick={saveAll} />}>
 
       {/* Day Type Cards */}
       {config.map(c => (
@@ -411,6 +401,6 @@ export default function SlotRules() {
           </div>
         )}
       </div>
-    </div>
+    </AdminPage>
   )
 }

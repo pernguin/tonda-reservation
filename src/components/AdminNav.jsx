@@ -1,11 +1,10 @@
 import { NavLink } from 'react-router-dom'
-
-const BRAND = '#E8420A'
+import { BRAND } from '../lib/adminTheme'
 
 export default function AdminNav({ unseenCount = 0, soundOn = false, onToggleSound }) {
   return (
-    <nav className="bg-white border-b border-gray-100 px-6 py-0">
-      <div className="flex gap-1 max-w-3xl mx-auto items-center">
+    <nav className="bg-white border-b border-gray-100 py-0">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 flex items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {[
           { to: '/admin', label: 'Dashboard' },
           { to: '/admin/bookings', label: 'Bookings' },
@@ -32,7 +31,7 @@ export default function AdminNav({ unseenCount = 0, soundOn = false, onToggleSou
               to={to}
               end={to === '/admin'}
               className={({ isActive }) =>
-                `px-4 py-3 text-xs tracking-widest uppercase font-medium border-b-2 transition-colors ${
+                `px-4 py-3 text-xs tracking-widest uppercase font-medium border-b-2 shrink-0 transition-colors ${
                   isActive
                     ? 'border-b-2'
                     : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -52,7 +51,7 @@ export default function AdminNav({ unseenCount = 0, soundOn = false, onToggleSou
         )}
         {onToggleSound && (
           <button type="button" onClick={onToggleSound}
-            className="ml-auto px-3 py-3 text-xs tracking-widest uppercase text-gray-400 hover:text-gray-600 transition-colors"
+            className="ml-auto shrink-0 px-3 py-3 text-xs tracking-widest uppercase text-gray-400 hover:text-gray-600 transition-colors"
             title="Play a chime when a new reservation arrives">
             {soundOn ? '🔔 Sound on' : '🔕 Sound off'}
           </button>

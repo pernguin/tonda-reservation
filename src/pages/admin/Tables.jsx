@@ -4,6 +4,8 @@ import { supabaseCustomers } from '../../supabaseCustomers'
 import { computeTableStatus, getLocalToday, isToday } from '../../lib/tableAvailability'
 import { getDayType } from '../../lib/dayType'
 import { buildTimeline, formatClock } from '../../lib/tableTimeline'
+import { useUrlState } from '../../lib/useUrlState'
+import { useToast } from '../../lib/useToast'
 
 const DATE_DEBOUNCE_MS = 300
 
@@ -129,8 +131,9 @@ export default function Tables() {
   const [blocks, setBlocks] = useState([])
   const [statusByTable, setStatusByTable] = useState(new Map())
   const [holdDurationMinutes, setHoldDurationMinutes] = useState(120)
-  const [dateInputValue, setDateInputValue] = useState(getLocalToday())
-  const [selectedDate, setSelectedDate] = useState(getLocalToday())
+  const [urlDate, setUrlDate] = useUrlState('date', '')
+  const [dateInputValue, setDateInputValue] = useState(() => urlDate || getLocalToday())
+  const [selectedDate, setSelectedDate] = useState(() => urlDate || getLocalToday())
   const [selected, setSelected] = useState(null)
   const [dragging, setDragging] = useState(null)
   const [saved, setSaved] = useState(false)
@@ -146,7 +149,7 @@ export default function Tables() {
   const [newTableForm, setNewTableForm] = useState({ table_number: '', capacity: '2' })
   const [deleteTableConfirm, setDeleteTableConfirm] = useState(null)
   const [explodingTableId, setExplodingTableId] = useState(null)
-  const [toast, setToast] = useState('')
+  const [showToast, toastNode] = useToast()
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
@@ -238,6 +241,7 @@ export default function Tables() {
     if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current)
     dateDebounceRef.current = setTimeout(() => {
       setSelectedDate(value)
+      setUrlDate(value === getLocalToday() ? '' : value)
     }, DATE_DEBOUNCE_MS)
   }
 
@@ -390,11 +394,6 @@ export default function Tables() {
     }
 
     doAssign(tableIds, reservationId)
-  }
-
-  function showToast(msg) {
-    setToast(msg)
-    setTimeout(() => setToast(''), 2500)
   }
 
   async function doAssign(tableIds, reservationId) {
@@ -1399,11 +1398,7 @@ export default function Tables() {
         </div>
       )}
 
-      {toast && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full z-50 shadow-lg">
-          {toast}
-        </div>
-      )}
+      {toastNode}
     </div>
   )
 }

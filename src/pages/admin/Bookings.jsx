@@ -3,17 +3,13 @@ import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
 import { logVisitFromReservation } from '../../lib/customerVisits'
 import { getLocalToday } from '../../lib/tableAvailability'
-
-const BRAND = '#E8420A'
-
-const statusColors = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  confirmed: 'bg-blue-100 text-blue-800',
-  seated: 'bg-green-100 text-green-800',
-  completed: 'bg-gray-100 text-gray-800',
-  cancelled: 'bg-red-100 text-red-800',
-  no_show: 'bg-orange-100 text-orange-800'
-}
+import { useUrlStateBatch } from '../../lib/useUrlState'
+import { useToast } from '../../lib/useToast'
+import AdminPage from '../../components/admin/AdminPage'
+import TabBar from '../../components/admin/TabBar'
+import FilterBar, { FilterField, FILTER_INPUT_CLASS } from '../../components/admin/FilterBar'
+import StatusBadge from '../../components/admin/StatusBadge'
+import { Loading, EmptyState } from '../../components/admin/States'
 
 const STATUS_LABELS = { cancelled: 'cancelled', no_show: 'a no-show' }
 
@@ -23,18 +19,6 @@ function getTableNumbers(tableIds, tables) {
     .map(id => tables.find(t => t.id === id)?.table_number)
     .filter(Boolean)
     .join(', ')
-}
-
-function EmptyState({ message = 'No bookings found.' }) {
-  return <p className="text-gray-400 text-sm text-center py-10">{message}</p>
-}
-
-function StatusBadge({ status }) {
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[status]}`}>
-      {status}
-    </span>
-  )
 }
 
 function ActionButtons({ table, id, busyId, updateStatus }) {
@@ -210,13 +194,15 @@ export default function Bookings() {
   const [events, setEvents] = useState([])
   const [offsite, setOffsite] = useState([])
   const [tables, setTables] = useState([])
-  const [tab, setTab] = useState('upcoming')
   const [loading, setLoading] = useState(true)
-  const [filterDate, setFilterDate] = useState(getLocalToday())
-  const [filterStatus, setFilterStatus] = useState('')
   const [busyId, setBusyId] = useState(null)
-  const [toast, setToast] = useState('')
+  const [showToast, toastNode] = useToast()
   const refetchTimer = useRef(null)
+
+  const [view, setView] = useUrlStateBatch({ tab: 'upcoming', date: '', status: '' })
+  const tab = view.tab
+  const filterDate = view.date === '' ? getLocalToday() : view.date === 'all' ? '' : view.date
+  const filterStatus = view.status
 
   useEffect(() => {
     fetchAll()
@@ -233,11 +219,6 @@ export default function Bookings() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  function showToast(msg) {
-    setToast(msg)
-    setTimeout(() => setToast(''), 2500)
-  }
 
   async function fetchAll({ silent = false } = {}) {
     if (!silent) setLoading(true)
@@ -424,22 +405,18 @@ export default function Bookings() {
     return null
   }
 
-  return (
-    <div className="min-h-screen bg-white p-8 max-w-3xl mx-auto">
-      <p className="text-xs tracking-widest uppercase mb-1" style={{ color: BRAND }}>Admin</p>
-      <h1 className="text-3xl font-light text-gray-900 mb-6">Manage Bookings</h1>
+  const hasFilters = filterDate !== '' || !!filterStatus
 
-      {/* Filters */}
-      <div className="flex gap-4 mb-6 flex-wrap items-end">
-        <div>
-          <label className="block text-xs tracking-widest uppercase text-gray-400 mb-1">Date</label>
-          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)}
-            className="border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors" />
-        </div>
-        <div>
-          <label className="block text-xs tracking-widest uppercase text-gray-400 mb-1">Status</label>
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-            className="border-b border-gray-200 bg-transparent py-2 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors">
+  return (
+    <AdminPage width="3xl" title="Manage Bookings" headerGap="6">
+      <FilterBar hasFilters={hasFilters} onClear={() => setView({ date: 'all', status: '' })}>
+        <FilterField label="Date">
+          <input type="date" value={filterDate} onChange={e => setView({ date: e.target.value || 'all' })}
+            className={FILTER_INPUT_CLASS} />
+        </FilterField>
+        <FilterField label="Status">
+          <select value={filterStatus} onChange={e => setView({ status: e.target.value })}
+            className={FILTER_INPUT_CLASS}>
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="confirmed">Confirmed</option>
@@ -448,35 +425,14 @@ export default function Bookings() {
             <option value="no_show">No Show</option>
             <option value="cancelled">Cancelled</option>
           </select>
-        </div>
-        {(filterDate || filterStatus) && (
-          <button onClick={() => { setFilterDate(''); setFilterStatus('') }}
-            className="text-xs tracking-widest uppercase text-gray-400 hover:text-gray-700 transition-colors pb-2">
-            Clear
-          </button>
-        )}
-      </div>
+        </FilterField>
+      </FilterBar>
 
-      {/* Tabs */}
-      <div className="flex gap-6 mb-6 border-b border-gray-100">
-        {tabs.map(({ key, label }) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`pb-3 text-sm font-medium transition-colors ${
-              tab === key ? 'border-b-2 -mb-px' : 'text-gray-400 hover:text-gray-600'
-            }`}
-            style={tab === key ? { borderColor: BRAND, color: BRAND } : {}}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <TabBar tabs={tabs} value={tab} onChange={key => setView({ tab: key })} />
 
-      {loading ? <p className="text-gray-400 text-sm">Loading...</p> : renderTab()}
+      {loading ? <Loading /> : renderTab()}
 
-      {toast && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full z-50 shadow-lg">
-          {toast}
-        </div>
-      )}
-    </div>
+      {toastNode}
+    </AdminPage>
   )
 }

@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabaseCustomers } from '../../supabaseCustomers'
+import { useUrlStateBatch } from '../../lib/useUrlState'
+import { useToast } from '../../lib/useToast'
+import { BRAND } from '../../lib/adminTheme'
+import AdminPage from '../../components/admin/AdminPage'
+import { Loading, EmptyState } from '../../components/admin/States'
 
-const BRAND = '#E8420A'
 const PAGE_SIZE = 50
 const LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), '#']
 const MONTHS = [
@@ -67,12 +71,25 @@ function Toggle({ checked, onChange, label }) {
   )
 }
 
+// DEFAULT_FILTERS <-> URL params: birthdayMonth<->month, lastVisitedDays<->days,
+// minVisits<->minVisits (all strings, '' = default); hasNoShows<->noShows,
+// emailConsent<->email, smsConsent<->sms (booleans as '1'/'').
 export default function Customers() {
   const [customers, setCustomers] = useState([])
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [activeLetter, setActiveLetter] = useState(null)
-  const [filters, setFilters] = useState(DEFAULT_FILTERS)
+  const [urlState, setUrlState] = useUrlStateBatch({
+    q: '', letter: '', month: '', days: '', minVisits: '', noShows: '', email: '', sms: ''
+  })
+  const [search, setSearch] = useState(urlState.q)
+  const debouncedSearch = urlState.q
+  const activeLetter = urlState.letter
+  const filters = useMemo(() => ({
+    birthdayMonth: urlState.month,
+    lastVisitedDays: urlState.days,
+    minVisits: urlState.minVisits,
+    hasNoShows: urlState.noShows === '1',
+    emailConsent: urlState.email === '1',
+    smsConsent: urlState.sms === '1',
+  }), [urlState.month, urlState.days, urlState.minVisits, urlState.noShows, urlState.email, urlState.sms])
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS)
   const [sheetMounted, setSheetMounted] = useState(false)
   const [sheetVisible, setSheetVisible] = useState(false)
@@ -81,11 +98,14 @@ export default function Customers() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selectedIds, setSelectedIds] = useState(new Set())
-  const [toast, setToast] = useState('')
+  const [showToast, toastNode] = useToast()
 
+  // A filter click inside this 300ms window may overwrite the pending `q` write
+  // (both call setUrlState); it self-corrects on the next keystroke/write.
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    const t = setTimeout(() => setUrlState({ q: search }), 300)
     return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
 
   useEffect(() => {
@@ -172,7 +192,7 @@ export default function Customers() {
   }
 
   function toggleLetter(l) {
-    setActiveLetter(prev => (prev === l ? null : l))
+    setUrlState({ letter: activeLetter === l ? '' : l })
   }
 
   function openFilterSheet() {
@@ -186,13 +206,20 @@ export default function Customers() {
   }
 
   function applyFilters() {
-    setFilters(draftFilters)
+    setUrlState({
+      month: draftFilters.birthdayMonth,
+      days: draftFilters.lastVisitedDays,
+      minVisits: draftFilters.minVisits,
+      noShows: draftFilters.hasNoShows ? '1' : '',
+      email: draftFilters.emailConsent ? '1' : '',
+      sms: draftFilters.smsConsent ? '1' : '',
+    })
     closeFilterSheet()
   }
 
   function resetFilters() {
     setDraftFilters(DEFAULT_FILTERS)
-    setFilters(DEFAULT_FILTERS)
+    setUrlState({ month: '', days: '', minVisits: '', noShows: '', email: '', sms: '' })
   }
 
   function toggleSelect(id) {
@@ -211,20 +238,12 @@ export default function Customers() {
     })
   }
 
-  function showToast(msg) {
-    setToast(msg)
-    setTimeout(() => setToast(''), 2500)
-  }
-
   const activeFilterCount = countActiveFilters(filters)
   const allSelected = customers.length > 0 && customers.every(c => selectedIds.has(c.id))
 
   return (
-    <div className={`min-h-screen bg-white p-4 md:p-8 max-w-4xl mx-auto ${selectedIds.size > 0 ? 'pb-24' : ''}`}>
-      <p className="text-xs tracking-widest uppercase mb-1" style={{ color: BRAND }}>Admin</p>
-      <h1 className="text-3xl font-light text-gray-900 mb-1">Customers</h1>
-      <p className="text-gray-400 text-sm mb-8">All customer contact information and booking history</p>
-
+    <AdminPage width="4xl" title="Customers" subtitle="All customer contact information and booking history"
+      className={selectedIds.size > 0 ? 'pb-24' : ''}>
       <div className="flex items-center gap-3 mb-4">
         <input
           value={search}
@@ -275,9 +294,9 @@ export default function Customers() {
       </div>
 
       {loading ? (
-        <p className="text-gray-400 text-sm py-4">Loading...</p>
+        <Loading className="py-4" />
       ) : customers.length === 0 ? (
-        <p className="text-gray-400 text-sm text-center py-10">No customers found.</p>
+        <EmptyState message="No customers found." />
       ) : (
         <>
           {customers.map(c => (
@@ -423,11 +442,7 @@ export default function Customers() {
         </div>
       )}
 
-      {toast && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full z-50 shadow-lg">
-          {toast}
-        </div>
-      )}
-    </div>
+      {toastNode}
+    </AdminPage>
   )
 }

@@ -1,14 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
 import { logVisitFromReservation } from '../../lib/customerVisits'
+import { getLocalToday } from '../../lib/tableAvailability'
 
 const BRAND = '#E8420A'
-
-function getLocalToday() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
 
 const statusColors = {
   pending: 'bg-yellow-100 text-yellow-800',
@@ -17,6 +13,196 @@ const statusColors = {
   completed: 'bg-gray-100 text-gray-800',
   cancelled: 'bg-red-100 text-red-800',
   no_show: 'bg-orange-100 text-orange-800'
+}
+
+const STATUS_LABELS = { cancelled: 'cancelled', no_show: 'a no-show' }
+
+function getTableNumbers(tableIds, tables) {
+  if (!tableIds || !Array.isArray(tableIds) || tableIds.length === 0) return ''
+  return tableIds
+    .map(id => tables.find(t => t.id === id)?.table_number)
+    .filter(Boolean)
+    .join(', ')
+}
+
+function EmptyState({ message = 'No bookings found.' }) {
+  return <p className="text-gray-400 text-sm text-center py-10">{message}</p>
+}
+
+function StatusBadge({ status }) {
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[status]}`}>
+      {status}
+    </span>
+  )
+}
+
+function ActionButtons({ table, id, busyId, updateStatus }) {
+  const actions = table === 'offsite_bookings'
+    ? [
+        { label: 'Confirm', status: 'confirmed', color: 'text-blue-600 hover:text-blue-800' },
+        { label: 'Completed', status: 'completed', color: 'text-gray-500 hover:text-gray-700' },
+        { label: 'Cancel', status: 'cancelled', color: 'text-red-400 hover:text-red-600' },
+      ]
+    : [
+        { label: 'Confirm', status: 'confirmed', color: 'text-blue-600 hover:text-blue-800' },
+        { label: 'Seated', status: 'seated', color: 'text-green-600 hover:text-green-800' },
+        { label: 'Completed', status: 'completed', color: 'text-gray-500 hover:text-gray-700' },
+        { label: 'No Show', status: 'no_show', color: 'text-orange-500 hover:text-orange-700' },
+        { label: 'Cancel', status: 'cancelled', color: 'text-red-400 hover:text-red-600' },
+      ]
+
+  return (
+    <div className="flex gap-4 flex-wrap mt-2">
+      {actions.map(a => (
+        <button key={a.status}
+          onClick={() => updateStatus(table, id, a.status)}
+          disabled={busyId === id}
+          className={`text-xs font-medium tracking-wide transition-colors disabled:opacity-40 disabled:cursor-wait ${a.color}`}>
+          {a.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Reservation list row
+function ReservationRow({ r, tables, busyId, updateStatus }) {
+  const [expanded, setExpanded] = useState(false)
+  const tableNums = getTableNumbers(r.table_ids, tables)
+
+  return (
+    <div className="border-b border-gray-100">
+      <div
+        className="flex items-center gap-4 py-3 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded transition-colors"
+        onClick={() => setExpanded(!expanded)}>
+        {/* Time */}
+        <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
+          {r.reservation_time?.slice(0, 5)}
+        </div>
+        {/* Name + phone */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 truncate">{r.customers?.full_name}</p>
+          <p className="text-xs text-gray-400">{r.customers?.phone}</p>
+        </div>
+        {/* Guests */}
+        <div className="text-xs text-gray-500 shrink-0">
+          👥 {r.guest_count}
+        </div>
+        {/* Table */}
+        <div className="w-16 text-xs text-gray-500 shrink-0 text-right">
+          {tableNums || ''}
+        </div>
+        {/* Status */}
+        <div className="shrink-0 flex items-center gap-1.5">
+          {r.needs_manual_assignment && (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700" title="Auto-assignment couldn't find a table — assign one manually">
+              ⚠️ Needs Table
+            </span>
+          )}
+          <StatusBadge status={r.status} />
+        </div>
+      </div>
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="px-2 pb-3 bg-gray-50 rounded -mx-2">
+          <p className="text-xs text-gray-500 mb-1">📅 {r.reservation_date} at {r.reservation_time}</p>
+          {r.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {r.customers.email}</p>}
+          {r.notes && <p className="text-xs text-gray-500 mb-1">📝 {r.notes}</p>}
+          {r.baby_chairs > 0 && <p className="text-xs text-gray-500 mb-1">🍼 Baby Chairs: {r.baby_chairs}</p>}
+          {r.pets && <p className="text-xs text-gray-500 mb-1">🐾 Pets: Yes</p>}
+          {tableNums && <p className="text-xs text-gray-500 mb-2">🪑 {tableNums}</p>}
+          {r.needs_manual_assignment && (
+            <p className="text-xs text-amber-700 mb-2">⚠️ Auto-assignment couldn't secure a table for this booking — assign one manually below.</p>
+          )}
+          <ActionButtons table="reservations" id={r.id} busyId={busyId} updateStatus={updateStatus} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Event list row
+function EventRow({ e, busyId, updateStatus }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="border-b border-gray-100">
+      <div
+        className="flex items-center gap-4 py-3 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded transition-colors"
+        onClick={() => setExpanded(!expanded)}>
+        <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
+          {e.event_time?.slice(0, 5)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 truncate">{e.customers?.full_name}</p>
+          <p className="text-xs text-gray-400">{e.customers?.phone}</p>
+        </div>
+        <div className="text-xs text-gray-500 shrink-0">👥 {e.guest_count}</div>
+        <div className="w-16 text-xs text-gray-500 shrink-0 text-right capitalize">{e.event_type}</div>
+        <div className="shrink-0"><StatusBadge status={e.status} /></div>
+      </div>
+      {expanded && (
+        <div className="px-2 pb-3 bg-gray-50 rounded -mx-2">
+          <p className="text-xs text-gray-500 mb-1">📅 {e.event_date} at {e.event_time}</p>
+          {e.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {e.customers.email}</p>}
+          {e.budget_range && <p className="text-xs text-gray-500 mb-1">💰 {e.budget_range}</p>}
+          {e.special_requests && <p className="text-xs text-gray-500 mb-1">📝 {e.special_requests}</p>}
+          <p className="text-xs text-gray-500 mb-2">📞 {e.preferred_contact} · {e.best_time_to_reach}</p>
+          <ActionButtons table="events" id={e.id} busyId={busyId} updateStatus={updateStatus} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Offsite list row
+function OffsiteRow({ o, busyId, updateStatus }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="border-b border-gray-100">
+      <div
+        className="flex items-center gap-4 py-3 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded transition-colors"
+        onClick={() => setExpanded(!expanded)}>
+        <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
+          {o.event_time?.slice(0, 5)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 truncate">{o.customers?.full_name}</p>
+          <p className="text-xs text-gray-400">{o.customers?.phone}</p>
+        </div>
+        <div className="text-xs text-gray-500 shrink-0">👥 {o.guest_count}</div>
+        <div className="w-16 text-xs text-gray-500 shrink-0 text-right capitalize">{o.event_type}</div>
+        <div className="shrink-0"><StatusBadge status={o.status} /></div>
+      </div>
+      {expanded && (
+        <div className="px-2 pb-3 bg-gray-50 rounded -mx-2">
+          <p className="text-xs text-gray-500 mb-1">📅 {o.event_date} at {o.event_time}</p>
+          {o.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {o.customers.email}</p>}
+          <p className="text-xs text-gray-500 mb-1">📍 {o.venue_address}</p>
+          {o.special_requests && <p className="text-xs text-gray-500 mb-1">📝 {o.special_requests}</p>}
+          <ActionButtons table="offsite_bookings" id={o.id} busyId={busyId} updateStatus={updateStatus} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Column headers
+function ListHeader({ showTable = true }) {
+  return (
+    <div className="flex items-center gap-4 py-2 border-b border-gray-200 mb-1">
+      <div className="w-16 text-xs tracking-widest uppercase text-gray-400">Time</div>
+      <div className="flex-1 text-xs tracking-widest uppercase text-gray-400">Guest</div>
+      <div className="text-xs tracking-widest uppercase text-gray-400 shrink-0">Pax</div>
+      <div className="w-16 text-xs tracking-widest uppercase text-gray-400 text-right shrink-0">
+        {showTable ? 'Table' : 'Type'}
+      </div>
+      <div className="text-xs tracking-widest uppercase text-gray-400 shrink-0">Status</div>
+    </div>
+  )
 }
 
 export default function Bookings() {
@@ -28,17 +214,45 @@ export default function Bookings() {
   const [loading, setLoading] = useState(true)
   const [filterDate, setFilterDate] = useState(getLocalToday())
   const [filterStatus, setFilterStatus] = useState('')
+  const [busyId, setBusyId] = useState(null)
+  const [toast, setToast] = useState('')
+  const refetchTimer = useRef(null)
 
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => {
+    fetchAll()
+    const channel = supabase
+      .channel('admin-bookings-list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
+        clearTimeout(refetchTimer.current)
+        refetchTimer.current = setTimeout(() => fetchAll({ silent: true }), 500)
+      })
+      .subscribe()
+    return () => {
+      clearTimeout(refetchTimer.current)
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  async function fetchAll() {
-    setLoading(true)
+  function showToast(msg) {
+    setToast(msg)
+    setTimeout(() => setToast(''), 2500)
+  }
+
+  async function fetchAll({ silent = false } = {}) {
+    if (!silent) setLoading(true)
     const [r, e, o, t] = await Promise.all([
       supabase.from('reservations').select('*').order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
       supabase.from('events').select('*').order('event_date', { ascending: true }),
       supabase.from('offsite_bookings').select('*').order('event_date', { ascending: true }),
       supabase.from('restaurant_tables').select('id, table_number')
     ])
+    const failed = [r, e, o, t].find(res => res.error)
+    if (failed) {
+      showToast('Could not load bookings: ' + failed.error.message)
+      setLoading(false)
+      return
+    }
 
     const reservationsData = r.data || []
     const eventsData = e.data || []
@@ -52,10 +266,15 @@ export default function Bookings() {
 
     let customersById = {}
     if (customerIds.length > 0) {
-      const { data: customersData } = await supabaseCustomers
+      const { data: customersData, error: customersError } = await supabaseCustomers
         .from('customers')
         .select('id, full_name, phone, email')
         .in('id', customerIds)
+      if (customersError) {
+        showToast('Could not load bookings: ' + customersError.message)
+        setLoading(false)
+        return
+      }
       customersById = Object.fromEntries((customersData || []).map(c => [c.id, c]))
     }
 
@@ -67,16 +286,24 @@ export default function Bookings() {
   }
 
   async function updateStatus(table, id, status) {
-    await supabase.from(table).update({ status }).eq('id', id)
+    if (STATUS_LABELS[status] && !confirm(`Mark this booking as ${STATUS_LABELS[status]}?`)) return
 
-    if (table === 'reservations' && (status === 'completed' || status === 'no_show')) {
-      const reservation = reservations.find(r => r.id === id)
-      if (reservation) logVisitFromReservation(reservation, status, 'tonda')
+    setBusyId(id)
+    const { error } = await supabase.from(table).update({ status }).eq('id', id)
+    if (error) {
+      showToast('Could not update status: ' + error.message)
+      setBusyId(null)
+      return
+    }
+
+    const reservation = table === 'reservations' ? reservations.find(r => r.id === id) : null
+
+    if (reservation && (status === 'completed' || status === 'no_show')) {
+      await logVisitFromReservation(reservation, status, 'tonda')
     }
 
     // When reservation is completed, release locks and unmerge any merged tables
     if (table === 'reservations' && status === 'completed') {
-      const reservation = reservations.find(r => r.id === id)
       if (reservation && Array.isArray(reservation.table_ids) && reservation.table_ids.length > 0) {
         // Release locks on all assigned tables
         await supabase
@@ -107,15 +334,8 @@ export default function Bookings() {
       }
     }
 
-    fetchAll()
-  }
-
-  function getTableNumbers(tableIds) {
-    if (!tableIds || !Array.isArray(tableIds) || tableIds.length === 0) return ''
-    return tableIds
-      .map(id => tables.find(t => t.id === id)?.table_number)
-      .filter(Boolean)
-      .join(', ')
+    await fetchAll({ silent: true })
+    setBusyId(null)
   }
 
   const today = getLocalToday()
@@ -136,247 +356,59 @@ export default function Bookings() {
     )
   }
 
-  const filteredUpcomingRes     = applyFilters(upcomingRes, 'reservation_date')
-  const filteredUpcomingEvents  = applyFilters(upcomingEvents, 'event_date')
-  const filteredUpcomingOffsite = applyFilters(upcomingOffsite, 'event_date')
-  const filteredPastRes         = applyFilters(pastRes, 'reservation_date')
-  const filteredPastEvents      = applyFilters(pastEvents, 'event_date')
-  const filteredPastOffsite     = applyFilters(pastOffsite, 'event_date')
-  const filteredActiveEvents    = applyFilters(activeEvents, 'event_date')
-  const filteredActiveOffsite   = applyFilters(activeOffsite, 'event_date')
-
   const tabs = [
-    { key: 'upcoming', label: `Upcoming (${filteredUpcomingRes.length + filteredUpcomingEvents.length + filteredUpcomingOffsite.length})` },
-    { key: 'past',     label: `Past (${filteredPastRes.length + filteredPastEvents.length + filteredPastOffsite.length})` },
-    { key: 'events',   label: `Events (${filteredActiveEvents.length})` },
-    { key: 'offsite',  label: `Off-Site (${filteredActiveOffsite.length})` },
+    { key: 'upcoming', label: `Upcoming (${upcomingRes.length + upcomingEvents.length + upcomingOffsite.length})` },
+    { key: 'past',     label: `Past (${pastRes.length + pastEvents.length + pastOffsite.length})` },
+    { key: 'events',   label: `Events (${activeEvents.length})` },
+    { key: 'offsite',  label: `Off-Site (${activeOffsite.length})` },
   ]
 
-  function EmptyState({ message = 'No bookings found.' }) {
-    return <p className="text-gray-400 text-sm text-center py-10">{message}</p>
-  }
-
-  function StatusBadge({ status }) {
-    return (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[status]}`}>
-        {status}
-      </span>
-    )
-  }
-
-  function ActionButtons({ table, id }) {
-    const actions = table === 'offsite_bookings'
-      ? [
-          { label: 'Confirm', status: 'confirmed', color: 'text-blue-600 hover:text-blue-800' },
-          { label: 'Completed', status: 'completed', color: 'text-gray-500 hover:text-gray-700' },
-          { label: 'Cancel', status: 'cancelled', color: 'text-red-400 hover:text-red-600' },
-        ]
-      : [
-          { label: 'Confirm', status: 'confirmed', color: 'text-blue-600 hover:text-blue-800' },
-          { label: 'Seated', status: 'seated', color: 'text-green-600 hover:text-green-800' },
-          { label: 'Completed', status: 'completed', color: 'text-gray-500 hover:text-gray-700' },
-          { label: 'No Show', status: 'no_show', color: 'text-orange-500 hover:text-orange-700' },
-          { label: 'Cancel', status: 'cancelled', color: 'text-red-400 hover:text-red-600' },
-        ]
-
-    return (
-      <div className="flex gap-4 flex-wrap mt-2">
-        {actions.map(a => (
-          <button key={a.status}
-            onClick={() => updateStatus(table, id, a.status)}
-            className={`text-xs font-medium tracking-wide transition-colors ${a.color}`}>
-            {a.label}
-          </button>
-        ))}
-      </div>
-    )
-  }
-
-  // Reservation list row
-  function ReservationRow({ r }) {
-    const [expanded, setExpanded] = useState(false)
-    const tableNums = getTableNumbers(r.table_ids)
-
-    return (
-      <div className="border-b border-gray-100">
-        <div
-          className="flex items-center gap-4 py-3 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded transition-colors"
-          onClick={() => setExpanded(!expanded)}>
-          {/* Time */}
-          <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
-            {r.reservation_time?.slice(0, 5)}
-          </div>
-          {/* Name + phone */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{r.customers?.full_name}</p>
-            <p className="text-xs text-gray-400">{r.customers?.phone}</p>
-          </div>
-          {/* Guests */}
-          <div className="text-xs text-gray-500 shrink-0">
-            👥 {r.guest_count}
-          </div>
-          {/* Table */}
-          <div className="w-16 text-xs text-gray-500 shrink-0 text-right">
-            {tableNums || ''}
-          </div>
-          {/* Status */}
-          <div className="shrink-0 flex items-center gap-1.5">
-            {r.needs_manual_assignment && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700" title="Auto-assignment couldn't find a table — assign one manually">
-                ⚠️ Needs Table
-              </span>
-            )}
-            <StatusBadge status={r.status} />
-          </div>
-        </div>
-
-        {/* Expanded details */}
-        {expanded && (
-          <div className="px-2 pb-3 bg-gray-50 rounded -mx-2">
-            <p className="text-xs text-gray-500 mb-1">📅 {r.reservation_date} at {r.reservation_time}</p>
-            {r.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {r.customers.email}</p>}
-            {r.notes && <p className="text-xs text-gray-500 mb-1">📝 {r.notes}</p>}
-            {r.baby_chairs > 0 && <p className="text-xs text-gray-500 mb-1">🍼 Baby Chairs: {r.baby_chairs}</p>}
-            {r.pets && <p className="text-xs text-gray-500 mb-1">🐾 Pets: Yes</p>}
-            {tableNums && <p className="text-xs text-gray-500 mb-2">🪑 {tableNums}</p>}
-            {r.needs_manual_assignment && (
-              <p className="text-xs text-amber-700 mb-2">⚠️ Auto-assignment couldn't secure a table for this booking — assign one manually below.</p>
-            )}
-            <ActionButtons table="reservations" id={r.id} />
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Event list row
-  function EventRow({ e }) {
-    const [expanded, setExpanded] = useState(false)
-
-    return (
-      <div className="border-b border-gray-100">
-        <div
-          className="flex items-center gap-4 py-3 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded transition-colors"
-          onClick={() => setExpanded(!expanded)}>
-          <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
-            {e.event_time?.slice(0, 5)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{e.customers?.full_name}</p>
-            <p className="text-xs text-gray-400">{e.customers?.phone}</p>
-          </div>
-          <div className="text-xs text-gray-500 shrink-0">👥 {e.guest_count}</div>
-          <div className="w-16 text-xs text-gray-500 shrink-0 text-right capitalize">{e.event_type}</div>
-          <div className="shrink-0"><StatusBadge status={e.status} /></div>
-        </div>
-        {expanded && (
-          <div className="px-2 pb-3 bg-gray-50 rounded -mx-2">
-            <p className="text-xs text-gray-500 mb-1">📅 {e.event_date} at {e.event_time}</p>
-            {e.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {e.customers.email}</p>}
-            {e.budget_range && <p className="text-xs text-gray-500 mb-1">💰 {e.budget_range}</p>}
-            {e.special_requests && <p className="text-xs text-gray-500 mb-1">📝 {e.special_requests}</p>}
-            <p className="text-xs text-gray-500 mb-2">📞 {e.preferred_contact} · {e.best_time_to_reach}</p>
-            <ActionButtons table="events" id={e.id} />
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Offsite list row
-  function OffsiteRow({ o }) {
-    const [expanded, setExpanded] = useState(false)
-
-    return (
-      <div className="border-b border-gray-100">
-        <div
-          className="flex items-center gap-4 py-3 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded transition-colors"
-          onClick={() => setExpanded(!expanded)}>
-          <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
-            {o.event_time?.slice(0, 5)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{o.customers?.full_name}</p>
-            <p className="text-xs text-gray-400">{o.customers?.phone}</p>
-          </div>
-          <div className="text-xs text-gray-500 shrink-0">👥 {o.guest_count}</div>
-          <div className="w-16 text-xs text-gray-500 shrink-0 text-right capitalize">{o.event_type}</div>
-          <div className="shrink-0"><StatusBadge status={o.status} /></div>
-        </div>
-        {expanded && (
-          <div className="px-2 pb-3 bg-gray-50 rounded -mx-2">
-            <p className="text-xs text-gray-500 mb-1">📅 {o.event_date} at {o.event_time}</p>
-            {o.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {o.customers.email}</p>}
-            <p className="text-xs text-gray-500 mb-1">📍 {o.venue_address}</p>
-            {o.special_requests && <p className="text-xs text-gray-500 mb-1">📝 {o.special_requests}</p>}
-            <ActionButtons table="offsite_bookings" id={o.id} />
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Column headers
-  function ListHeader({ showTable = true }) {
-    return (
-      <div className="flex items-center gap-4 py-2 border-b border-gray-200 mb-1">
-        <div className="w-16 text-xs tracking-widest uppercase text-gray-400">Time</div>
-        <div className="flex-1 text-xs tracking-widest uppercase text-gray-400">Guest</div>
-        <div className="text-xs tracking-widest uppercase text-gray-400 shrink-0">Pax</div>
-        <div className="w-16 text-xs tracking-widest uppercase text-gray-400 text-right shrink-0">
-          {showTable ? 'Table' : 'Type'}
-        </div>
-        <div className="text-xs tracking-widest uppercase text-gray-400 shrink-0">Status</div>
-      </div>
-    )
-  }
-
-  function TabContent() {
+  function renderTab() {
     if (tab === 'upcoming') {
-      const res  = filteredUpcomingRes
-      const evts = filteredUpcomingEvents
-      const off  = filteredUpcomingOffsite
+      const res  = applyFilters(upcomingRes, 'reservation_date')
+      const evts = applyFilters(upcomingEvents, 'event_date')
+      const off  = applyFilters(upcomingOffsite, 'event_date')
       if (res.length + evts.length + off.length === 0) return <EmptyState message="No upcoming bookings." />
       return (
         <>
           <ListHeader showTable={true} />
-          {res.map(r  => <ReservationRow key={r.id} r={r} />)}
-          {evts.map(e => <EventRow key={e.id} e={e} />)}
-          {off.map(o  => <OffsiteRow key={o.id} o={o} />)}
+          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} />)}
+          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
+          {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
         </>
       )
     }
     if (tab === 'past') {
-      const res  = filteredPastRes
-      const evts = filteredPastEvents
-      const off  = filteredPastOffsite
+      const res  = applyFilters(pastRes, 'reservation_date')
+      const evts = applyFilters(pastEvents, 'event_date')
+      const off  = applyFilters(pastOffsite, 'event_date')
       if (res.length + evts.length + off.length === 0) return <EmptyState message="No past bookings." />
       return (
         <>
           <ListHeader showTable={true} />
-          {res.map(r  => <ReservationRow key={r.id} r={r} />)}
-          {evts.map(e => <EventRow key={e.id} e={e} />)}
-          {off.map(o  => <OffsiteRow key={o.id} o={o} />)}
+          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} />)}
+          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
+          {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
         </>
       )
     }
     if (tab === 'events') {
-      const evts = filteredActiveEvents
+      const evts = applyFilters(activeEvents, 'event_date')
       if (evts.length === 0) return <EmptyState message="No events found." />
       return (
         <>
           <ListHeader showTable={false} />
-          {evts.map(e => <EventRow key={e.id} e={e} />)}
+          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
         </>
       )
     }
     if (tab === 'offsite') {
-      const off = filteredActiveOffsite
+      const off = applyFilters(activeOffsite, 'event_date')
       if (off.length === 0) return <EmptyState message="No off-site bookings found." />
       return (
         <>
           <ListHeader showTable={false} />
-          {off.map(o => <OffsiteRow key={o.id} o={o} />)}
+          {off.map(o => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
         </>
       )
     }
@@ -429,7 +461,13 @@ export default function Bookings() {
         ))}
       </div>
 
-      {loading ? <p className="text-gray-400 text-sm">Loading...</p> : <TabContent />}
+      {loading ? <p className="text-gray-400 text-sm">Loading...</p> : renderTab()}
+
+      {toast && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full z-50 shadow-lg">
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

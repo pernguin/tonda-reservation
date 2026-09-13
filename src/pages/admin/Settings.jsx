@@ -8,7 +8,8 @@ export default function Settings() {
   const [messages, setMessages] = useState({
     confirmation_message_reservation: '',
     confirmation_message_event: '',
-    confirmation_message_offsite: ''
+    confirmation_message_offsite: '',
+    staff_alert_email: ''
   })
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -41,7 +42,7 @@ export default function Settings() {
         <div>
           <p className="text-xs tracking-widest uppercase mb-1" style={{ color: BRAND }}>Admin</p>
           <h1 className="text-3xl font-light text-gray-900">Settings</h1>
-          <p className="text-gray-400 text-sm mt-1">Manage confirmation messages sent to customers</p>
+          <p className="text-gray-400 text-sm mt-1">Manage confirmation messages and staff alerts</p>
         </div>
         <button onClick={saveAll}
           className="px-8 py-3 text-sm font-medium tracking-widest uppercase text-white transition-opacity hover:opacity-90"
@@ -84,6 +85,19 @@ export default function Settings() {
             onChange={e => setMessages(prev => ({ ...prev, confirmation_message_offsite: e.target.value }))}
             rows={4}
             className="w-full border-b border-gray-200 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors resize-none"
+          />
+        </div>
+
+        <div>
+          <p className="text-lg font-medium text-gray-900 mb-1">Staff alert emails</p>
+          <p className="text-xs text-gray-400 mb-3">Sent a copy of every new reservation. Comma-separated. Leave blank to disable.</p>
+          <label className={labelClass}>Addresses</label>
+          <input
+            type="text"
+            value={messages.staff_alert_email}
+            onChange={e => setMessages(prev => ({ ...prev, staff_alert_email: e.target.value }))}
+            placeholder="manager@example.com, floor@example.com"
+            className="w-full border-b border-gray-200 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors"
           />
         </div>
       </div>

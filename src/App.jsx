@@ -15,7 +15,7 @@ import SlotRules from './pages/admin/SlotRules'
 import Customers from './pages/admin/Customers'
 import Login from './pages/admin/Login'
 import RequireAuth from './components/RequireAuth'
-import AdminNav from './components/AdminNav'
+import NewBookingAlert from './components/NewBookingAlert'
 import Settings from './pages/admin/Settings'
 import Experiences from './pages/admin/Experiences'
 
@@ -27,7 +27,7 @@ function Layout() {
   return (
     <>
       {!isStandalone && <Navbar />}
-      {location.pathname.startsWith('/admin') && location.pathname !== '/admin/login' && <AdminNav />}
+      {location.pathname.startsWith('/admin') && location.pathname !== '/admin/login' && <NewBookingAlert />}
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/reservations" element={<Reservations />} />

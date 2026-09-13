@@ -14,6 +14,7 @@ export default function ManageBooking() {
   const [error, setError] = useState(null)
   const [cancelling, setCancelling] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [cancelError, setCancelError] = useState(null)
 
   useEffect(() => { fetchBooking() }, [id])
 
@@ -46,12 +47,12 @@ export default function ManageBooking() {
 
   async function cancelBooking() {
     setCancelling(true)
-    const { error } = await supabase
-      .from('reservations')
-      .update({ status: 'cancelled' })
-      .eq('id', id)
+    setCancelError(null)
+    const { data, error } = await supabase.rpc('cancel_reservation', { p_id: id })
     if (error) {
-      setError('Something went wrong. Please try again.')
+      setCancelError('Something went wrong. Please try again.')
+    } else if (data === false) {
+      setCancelError('This booking can no longer be cancelled online — please call us.')
     } else {
       setCancelled(true)
     }
@@ -155,6 +156,9 @@ export default function ManageBooking() {
 
         {!isPast && booking.status !== 'completed' && booking.status !== 'seated' && (
           <>
+            {cancelError && (
+              <p className="text-[var(--color-text-2)] text-sm mb-4">{cancelError}</p>
+            )}
             {!showConfirm ? (
               <button
                 onClick={() => setShowConfirm(true)}

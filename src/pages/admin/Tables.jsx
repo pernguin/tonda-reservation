@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
 import { computeTableStatus, getLocalToday, isToday } from '../../lib/tableAvailability'
 import { getDayType } from '../../lib/dayType'
+import { buildTimeline, formatClock } from '../../lib/tableTimeline'
 
 const DATE_DEBOUNCE_MS = 300
 
@@ -10,7 +11,6 @@ const FLOOR_POINTS = [
   [30, 80], [30, 320], [370, 320], [370, 30],
   [130, 30], [130, 80]
 ]
-const ENTRANCE = { x: 370, y: 60 }
 
 function getTableSize(table) {
   if (table.table_number === 'BT') {
@@ -26,18 +26,19 @@ function getTableColor(table, status) {
   const s = status?.status || 'free'
   if (s === 'blocked') return '#9ca3af'
   if (s === 'locked') return '#7c3aed'
+  if (s === 'arriving') return '#f59e0b'
   if (table.table_number === 'BT') {
     if (s === 'seated') return '#16a34a'
-    if (s === 'reserved') return '#ca8a04'
+    if (s === 'reserved' || s === 'occupied') return '#ca8a04'
     return '#1B3A6B'
   }
   if (table.table_number?.startsWith('B') && table.table_number !== 'BT') {
     if (s === 'seated') return '#16a34a'
-    if (s === 'reserved') return '#ca8a04'
+    if (s === 'reserved' || s === 'occupied') return '#ca8a04'
     return '#1B3A6B'
   }
   if (s === 'seated') return '#16a34a'
-  if (s === 'reserved') return '#ca8a04'
+  if (s === 'reserved' || s === 'occupied') return '#ca8a04'
   return '#E8420A'
 }
 
@@ -125,6 +126,7 @@ const emptyBlockForm = { date: '', start_time: '', end_time: '', reason: '' }
 export default function Tables() {
   const [tables, setTables] = useState([])
   const [reservations, setReservations] = useState([])
+  const [blocks, setBlocks] = useState([])
   const [statusByTable, setStatusByTable] = useState(new Map())
   const [holdDurationMinutes, setHoldDurationMinutes] = useState(120)
   const [dateInputValue, setDateInputValue] = useState(getLocalToday())
@@ -150,13 +152,79 @@ export default function Tables() {
   const dragMoved = useRef(false)
   const dateDebounceRef = useRef(null)
   const requestIdRef = useRef(0)
+  const latestDataRef = useRef({ tables: [], reservations: [], blocks: [], hold: 120 })
 
   useEffect(() => { fetchAll() }, [selectedDate])
+
+  // Live refresh: any change to today's reservations, the tables, or today's blocks refetches the
+  // plan. Held while editing the layout (a refetch mid-drag would snap tables back) and applied once
+  // when leaving layout mode.
+  const refetchTimer = useRef(null)
+  const pendingRefetch = useRef(false)
+  const modeRef = useRef(mode)
+  useEffect(() => { modeRef.current = mode }, [mode])
+
+  useEffect(() => {
+    const schedule = () => {
+      if (modeRef.current === 'layout') { pendingRefetch.current = true; return }
+      clearTimeout(refetchTimer.current)
+      refetchTimer.current = setTimeout(() => fetchAll(), 500)
+    }
+    const channel = supabase
+      .channel(`admin-floorplan-live-${selectedDate}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations', filter: `reservation_date=eq.${selectedDate}` }, schedule)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, schedule)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'table_blocks', filter: `block_date=eq.${selectedDate}` }, schedule)
+      .subscribe()
+    return () => {
+      clearTimeout(refetchTimer.current)
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate])
+
+  useEffect(() => {
+    if (mode !== 'layout' && pendingRefetch.current) {
+      pendingRefetch.current = false
+      fetchAll()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
 
   // Clear any pending debounce on unmount so it doesn't fire after teardown.
   useEffect(() => () => {
     if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current)
   }, [])
+
+  // Keep a ref mirror of the latest fetched data so the interval below always
+  // recomputes from current rows without needing them (and thus recomputeStatus)
+  // in its own dependency array, which would tear the interval down and set it
+  // up again on every fetch.
+  useEffect(() => {
+    latestDataRef.current = { tables, reservations, blocks, hold: holdDurationMinutes }
+  }, [tables, reservations, blocks, holdDurationMinutes])
+
+  const recomputeStatus = useCallback((tableRows, resRows, blockRows, hold) => {
+    const opts = { dateString: selectedDate, tables: tableRows, reservations: resRows, blocks: blockRows }
+    if (isToday(selectedDate)) {
+      const now = new Date()
+      opts.atMinutes = now.getHours() * 60 + now.getMinutes()
+      opts.holdMinutes = hold
+    }
+    const statusList = computeTableStatus(opts)
+    setStatusByTable(new Map(statusList.map(s => [s.table_id, s])))
+  }, [selectedDate])
+
+  // While viewing today, recompute status every minute so tables move through
+  // free -> arriving -> occupied as the clock advances, without refetching.
+  useEffect(() => {
+    if (!isToday(selectedDate)) return
+    const interval = setInterval(() => {
+      const { tables: t, reservations: r, blocks: b, hold } = latestDataRef.current
+      recomputeStatus(t, r, b, hold)
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [selectedDate, recomputeStatus])
 
   function handleDateInputChange(value) {
     setSelected(null)
@@ -184,7 +252,7 @@ export default function Tables() {
         .in('status', ['confirmed', 'pending', 'seated'])
         .order('reservation_time', { ascending: true }),
       supabase.from('table_blocks')
-        .select('id, table_id, reason, source_type, source_id')
+        .select('id, table_id, reason, source_type, source_id, start_time, end_time')
         .eq('block_date', selectedDate),
       supabase.from('slot_rules').select('hold_duration_minutes').eq('day_type', dayType).maybeSingle()
     ])
@@ -208,16 +276,13 @@ export default function Tables() {
 
     const tableRows = (tableData || []).map(t => ({ ...t, rotated: t.rotated || false }))
     const reservationRows = reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] }))
+    const blockRows = blockData || []
+    const hold = slotRuleData?.hold_duration_minutes ?? 120
     setTables(tableRows)
     setReservations(reservationRows)
-    setHoldDurationMinutes(slotRuleData?.hold_duration_minutes ?? 120)
-    const statusList = computeTableStatus({
-      dateString: selectedDate,
-      tables: tableRows,
-      reservations: reservationRows,
-      blocks: blockData || []
-    })
-    setStatusByTable(new Map(statusList.map(s => [s.table_id, s])))
+    setBlocks(blockRows)
+    setHoldDurationMinutes(hold)
+    recomputeStatus(tableRows, reservationRows, blockRows, hold)
   }
 
   async function saveTables() {
@@ -728,8 +793,20 @@ export default function Tables() {
               points={FLOOR_POINTS.map(p => p.join(',')).join(' ')}
               fill="#fafaf8" stroke="#333" strokeWidth="1.5"
             />
-            <rect x={ENTRANCE.x - 2} y={ENTRANCE.y - 12} width="3" height="24" fill="#ef4444" />
-            <text x={ENTRANCE.x - 35} y={ENTRANCE.y + 4} fontSize="8" fill="#ef4444" fontWeight="500">Entrance</text>
+            {/* Fixtures: static landmarks outside the walkable floor; never draggable */}
+            <g pointerEvents="none">
+              {/* Store room: solid walled block bottom-right */}
+              <rect x="215" y="215" width="150" height="100" rx="3" fill="#3f3f3f" stroke="#333" strokeWidth="1.5" />
+              <text x="290" y="268" textAnchor="middle" dominantBaseline="central"
+                fontSize="9" letterSpacing="1.5" fill="#d4d4d4">STORE</text>
+
+              {/* Door: gap in the right wall, door leaf, inward swing, arrow from outside, label */}
+              <rect x="367" y="46" width="6" height="28" fill="#fafaf8" />
+              <path d="M 370 74 L 344 74 A 26 26 0 0 1 370 48" fill="#c8281e" fillOpacity="0.10" stroke="#c8281e" strokeWidth="2" strokeLinejoin="round" />
+              <line x1="370" y1="74" x2="344" y2="74" stroke="#c8281e" strokeWidth="3.5" strokeLinecap="round" />
+              <path d="M 384 60 l -10 -5 v 10 z" fill="#c8281e" />
+              <text x="366" y="91" textAnchor="end" fontSize="9" fontWeight="700" letterSpacing="1.4" fill="#c8281e">ENTRANCE</text>
+            </g>
 
             {/* Fixed bar counter */}
             <rect x={80} y={120} width={200} height={18} rx="2" fill="#1B3A6B" opacity="0.7" />
@@ -1029,10 +1106,10 @@ export default function Tables() {
                 <p className="text-xs text-gray-400 mb-2">Legend</p>
                 <div className="flex flex-col gap-2 text-xs text-gray-500">
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded inline-block" style={{ backgroundColor: '#E8420A' }}></span> Free</span>
-                  <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-yellow-600 inline-block"></span> Reserved</span>
+                  {todayView && <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-amber-500 inline-block"></span> Arriving soon (30 min)</span>}
+                  <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-yellow-600 inline-block"></span> {todayView ? 'Reserved now' : 'Reserved'}</span>
                   {todayView && <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-green-600 inline-block"></span> Seated</span>}
                   <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-gray-400 inline-block"></span> Blocked</span>
-                  {todayView && <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-purple-700 inline-block"></span> Locked</span>}
                   <span className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded inline-block" style={{ backgroundColor: '#1B3A6B' }}></span>
                     Big Table
@@ -1083,6 +1160,48 @@ export default function Tables() {
                 <h3 className="font-bold text-base">{selectedTable.table_number}</h3>
                 <button onClick={() => { setSelected(null); setBlockFormOpen(false) }} className="text-gray-400 hover:text-black text-sm">✕ Close</button>
               </div>
+
+              {(() => {
+                const tl = buildTimeline({
+                  reservations: getTableReservations(selectedTable.id),
+                  blocks: blocks.filter(b => b.table_id === selectedTable.id),
+                  holdMinutes: holdDurationMinutes
+                })
+                const nowMin = todayView ? (new Date().getHours() * 60 + new Date().getMinutes()) : null
+                const nowPct = nowMin != null && nowMin >= tl.axisStart && nowMin <= tl.axisEnd
+                  ? ((nowMin - tl.axisStart) / (tl.axisEnd - tl.axisStart)) * 100 : null
+                const fill = s => s.kind === 'block' ? '#9ca3af' : s.status === 'seated' ? '#16a34a' : '#ca8a04'
+                return (
+                  <div className="mb-4">
+                    <p className="text-xs tracking-widest uppercase text-gray-400 mb-1">Timeline</p>
+                    <div className="relative h-5 rounded bg-gray-100 overflow-hidden">
+                      {tl.segments.map(s => (
+                        <div key={`${s.kind}-${s.id}`} title={s.label}
+                          className="absolute top-0 h-full rounded-sm"
+                          style={{ left: `${s.left}%`, width: `${Math.max(s.width, 1)}%`, backgroundColor: fill(s), opacity: 0.9 }} />
+                      ))}
+                      {nowPct != null && (
+                        <div className="absolute top-0 h-full w-px bg-red-500" style={{ left: `${nowPct}%` }} title="Now" />
+                      )}
+                    </div>
+                    <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                      <span>{formatClock(tl.axisStart)}</span><span>{formatClock(tl.axisEnd)}</span>
+                    </div>
+                    {tl.segments.length === 0
+                      ? <p className="text-xs text-gray-400 mt-1">Free all day.</p>
+                      : (
+                        <ul className="mt-1 space-y-0.5">
+                          {tl.segments.map(s => (
+                            <li key={`${s.kind}-${s.id}-row`} className="text-xs text-gray-600 flex items-center gap-2">
+                              <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: fill(s) }} />
+                              {s.label}{s.kind === 'reservation' ? ` · until ${formatClock(s.endMin)}` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                  </div>
+                )
+              })()}
 
               <div className="mb-4 p-3 rounded-lg border border-gray-200">
                 {selectedStatus?.status === 'blocked' && selectedStatus.block_id ? (

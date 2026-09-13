@@ -177,7 +177,7 @@ when 0 then 'Sunday' when 1 then 'Monday' when 2 then 'Tuesday'
 when 3 then 'Wednesday' when 4 then 'Thursday' when 5 then 'Friday'
 else 'Saturday' end;
 select * into v_hours from operating_hours where day_type = p_day_type;
-if v_hours.closed_days is not null and v_day_name = any(v_hours.closed_days) then
+if v_hours.closed_days is not null and v_hours.closed_days ? v_day_name then
 raise exception 'date_closed: Sorry, we are closed on %s.', v_day_name;
 end if;
 select * into v_slot_rule from slot_rules where day_type = p_day_type;

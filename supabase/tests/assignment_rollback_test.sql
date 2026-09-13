@@ -96,6 +96,16 @@ insert into public.restaurant_tables (id, table_number, capacity, x_position, y_
 insert into public.reservations (customer_id, reservation_date, reservation_time, guest_count, status, table_ids)
 values (null, date '2030-01-01', time '21:00', 2, 'confirmed', '["55555555-5555-5555-5555-555555555555"]'::jsonb);
 
+-- second temp reservation references the unreferenced, on-canvas duplicate (666...) so the
+-- re-point logic below has something to re-point.
+create temp table zzdup_ref_res (id uuid);
+with ins as (
+  insert into public.reservations (customer_id, reservation_date, reservation_time, guest_count, status, table_ids)
+  values (null, date '2030-01-01', time '22:00', 2, 'confirmed', '["66666666-6666-6666-6666-666666666666"]'::jsonb)
+  returning id
+)
+insert into zzdup_ref_res (id) select id from ins;
+
 do $$
 declare
   grp record; keep_id uuid; pos record;
@@ -126,6 +136,21 @@ begin
        where k.id = keep_id and not (k.x_position between 0 and 400 and k.y_position between 0 and 340);
     end if;
 
+    -- Re-point any reservation that referenced a doomed duplicate at the kept row.
+    update public.reservations r
+       set table_ids = (
+         select jsonb_agg(case when d.id is not null then to_jsonb(keep_id::text) else to_jsonb(e) end)
+         from jsonb_array_elements_text(r.table_ids) e
+         left join public.restaurant_tables d
+           on d.id::text = e and d.table_number = grp.table_number and d.id <> keep_id
+       )
+     where jsonb_typeof(r.table_ids) = 'array'
+       and exists (
+         select 1 from jsonb_array_elements_text(r.table_ids) e
+         join public.restaurant_tables d on d.id::text = e
+         where d.table_number = grp.table_number and d.id <> keep_id
+       );
+
     delete from public.table_blocks where table_id in
       (select id from public.restaurant_tables where table_number = grp.table_number and id <> keep_id);
     update public.restaurant_tables set locked_until = null, locked_by_reservation = null, group_id = null
@@ -136,7 +161,7 @@ end;
 $$;
 
 do $$
-declare n int; kept public.restaurant_tables;
+declare n int; kept public.restaurant_tables; refd_ids jsonb;
 begin
   select count(*) into n from public.restaurant_tables where table_number = 'ZZDUP';
   if n <> 1 then raise exception 'T7 dedupe: expected exactly 1 ZZDUP row, got %', n; end if;
@@ -145,6 +170,16 @@ begin
     raise exception 'T7 dedupe: wrong row kept: %', kept.id; end if;
   if kept.x_position <> 50 or kept.y_position <> 50 then
     raise exception 'T7 dedupe: position not adopted: (%, %)', kept.x_position, kept.y_position; end if;
+
+  select r.table_ids into refd_ids from public.reservations r
+   where r.id = (select id from zzdup_ref_res);
+  if refd_ids is null or jsonb_array_length(refd_ids) <> 1 then
+    raise exception 'T7b dedupe re-point: expected length-1 table_ids, got %', refd_ids; end if;
+  if not (refd_ids ? '55555555-5555-5555-5555-555555555555') then
+    raise exception 'T7b dedupe re-point: expected 555... in table_ids, got %', refd_ids; end if;
+  if refd_ids ? '66666666-6666-6666-6666-666666666666' then
+    raise exception 'T7b dedupe re-point: 666... still present in table_ids: %', refd_ids; end if;
+
   insert into results values ('dedupe: passed');
 end;
 $$;

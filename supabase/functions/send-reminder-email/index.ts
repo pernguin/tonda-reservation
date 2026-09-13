@@ -54,11 +54,23 @@ function buildEmail(reservation: any, customer: any): string {
 
 Deno.serve(async (req) => {
   try {
+    if (req.headers.get("Authorization") !== "Bearer " + SUPABASE_SERVICE_ROLE_KEY) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+    }
+
     const now = new Date();
     const targetTime = new Date(now.getTime() + 12 * 60 * 60 * 1000);
-    const targetDate = targetTime.toISOString().slice(0, 10);
-    const targetHour = targetTime.getUTCHours();
-    const targetMinute = targetTime.getUTCMinutes();
+
+    // Restaurant-local parts; reservation_date/time are stored in Malaysia local time.
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false,
+      }).formatToParts(targetTime).map((p) => [p.type, p.value]),
+    );
+    const targetDate = `${parts.year}-${parts.month}-${parts.day}`;
+    const targetHour = Number(parts.hour) % 24;
+    const targetMinute = Number(parts.minute);
 
     const { data: reservations, error } = await supabase
       .from("reservations")

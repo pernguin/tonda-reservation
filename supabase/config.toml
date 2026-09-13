@@ -1,0 +1,5 @@
+[functions.send-reminder-email]
+verify_jwt = true
+
+[functions.notify-staff-reservation]
+verify_jwt = true

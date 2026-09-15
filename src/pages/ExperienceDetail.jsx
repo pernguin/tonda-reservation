@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers } from '../supabaseCustomers'
+import { getLocalToday } from '../lib/tableAvailability'
 
 const BRAND = 'var(--color-accent)'
 const CREAM = 'var(--color-bg)'
 
 const inputClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors placeholder-[var(--color-text-muted)]"
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-[var(--color-text-2)]"
+const selectClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
 
 function normalisePhone(raw) {
   let p = raw.replace(/[\s\-\(\)]/g, '')
@@ -20,6 +22,8 @@ export default function ExperienceDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [experience, setExperience] = useState(undefined)
+  const [occurrences, setOccurrences] = useState([])
+  const [selectedId, setSelectedId] = useState(id)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', phone: '', pax: 1, notes: '' })
   const [loading, setLoading] = useState(false)
@@ -31,6 +35,27 @@ export default function ExperienceDetail() {
   async function fetchExperience() {
     const { data } = await supabase.from('experiences').select('*').eq('id', id).maybeSingle()
     setExperience(data || null)
+    if (data) {
+      let list
+      if (data.series_id == null) {
+        list = [data]
+      } else {
+        const today = getLocalToday()
+        const { data: seriesData } = await supabase
+          .from('experiences')
+          .select('*')
+          .eq('series_id', data.series_id)
+          .eq('status', 'published')
+          .gte('date', today)
+          .order('date', { ascending: true })
+        list = seriesData || []
+        if (!list.some(o => o.id === data.id)) {
+          list = [data, ...list]
+        }
+      }
+      setOccurrences(list)
+      setSelectedId(id)
+    }
   }
 
   function handleChange(e) {
@@ -58,7 +83,7 @@ export default function ExperienceDetail() {
     setError(null)
     try {
       const { error: insertError } = await supabase.from('experience_registrations').insert([{
-        experience_id: id,
+        experience_id: current.id,
         name: form.name,
         phone: normalisePhone(form.phone),
         pax: parseInt(form.pax) || 1,
@@ -98,6 +123,8 @@ export default function ExperienceDetail() {
     )
   }
 
+  const current = occurrences.find(o => o.id === selectedId) ?? experience
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
       <div className="max-w-lg mx-auto px-8 py-16">
@@ -106,23 +133,23 @@ export default function ExperienceDetail() {
           ← Back to Reservations
         </button>
 
-        {experience.poster_url && (
+        {current.poster_url && (
           <div className="w-full aspect-square rounded-xl overflow-hidden mb-8 bg-[var(--color-surface-2)]">
-            <img src={experience.poster_url} alt={experience.name} className="w-full h-full object-cover" />
+            <img src={current.poster_url} alt={current.name} className="w-full h-full object-cover" />
           </div>
         )}
 
         <p className="text-xs tracking-widest uppercase mb-2" style={{ color: BRAND }}>
           Tonda Pizza Romana
         </p>
-        <h1 className="text-3xl mb-2" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>{experience.name}</h1>
+        <h1 className="text-3xl mb-2" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>{current.name}</h1>
         <p className="text-[var(--color-text-2)] text-sm mb-1">
-          {experience.date} · {experience.time?.slice(0, 5)}
+          {current.date} · {current.time?.slice(0, 5)}
         </p>
-        <p className="text-sm font-medium mb-6" style={{ color: BRAND }}>{formatPrice(experience.price)}</p>
+        <p className="text-sm font-medium mb-6" style={{ color: BRAND }}>{formatPrice(current.price)}</p>
 
-        {experience.description && (
-          <p className="text-[var(--color-text-2)] text-sm leading-relaxed mb-10 whitespace-pre-line">{experience.description}</p>
+        {current.description && (
+          <p className="text-[var(--color-text-2)] text-sm leading-relaxed mb-10 whitespace-pre-line">{current.description}</p>
         )}
 
         {submitted ? (
@@ -136,6 +163,17 @@ export default function ExperienceDetail() {
             {error && (
               <div className="border-l-2 pl-4 py-2" style={{ borderColor: BRAND }}>
                 <p className="text-sm text-[var(--color-text-2)]">{error}</p>
+              </div>
+            )}
+            {occurrences.length > 1 && (
+              <div>
+                <label htmlFor="occurrence" className={labelClass}>Date *</label>
+                <select id="occurrence" name="occurrence" value={selectedId}
+                  onChange={e => setSelectedId(e.target.value)} required className={selectClass}>
+                  {occurrences.map(o => (
+                    <option key={o.id} value={o.id}>{o.date} · {o.time?.slice(0, 5)}</option>
+                  ))}
+                </select>
               </div>
             )}
             <div>

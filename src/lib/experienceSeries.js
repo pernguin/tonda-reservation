@@ -37,6 +37,33 @@ export function dateRange(startDate, endDate) {
   return dates
 }
 
+// Collapse published, date-ascending rows so each series appears once (its next
+// occurrence). Rows without series_id pass through untouched. Adds `upcomingCount`:
+// how many rows in the input share this series (1 for standalone rows).
+export function collapseSeries(rows) {
+  const result = []
+  const bySeriesId = new Map()
+
+  for (const row of rows) {
+    if (row.series_id == null) {
+      result.push({ ...row, upcomingCount: 1 })
+      continue
+    }
+
+    const existing = bySeriesId.get(row.series_id)
+    if (existing) {
+      existing.upcomingCount++
+      continue
+    }
+
+    const kept = { ...row, upcomingCount: 1 }
+    bySeriesId.set(row.series_id, kept)
+    result.push(kept)
+  }
+
+  return result
+}
+
 function daysInMonth(year, month) {
   // month is 1-12; day 0 of the next month is the last day of this one.
   return new Date(year, month, 0).getDate()

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers, findOrCreateCustomer, isValidPhone } from '../supabaseCustomers'
+import { collapseSeries } from '../lib/experienceSeries'
 
 async function getDateInfo(date) {
   const dateObj = new Date(date)
@@ -296,7 +297,7 @@ export default function Reservations() {
         .eq('status', 'published')
         .gte('date', today)
         .order('date', { ascending: true })
-      setExperiences(data || [])
+      setExperiences(collapseSeries(data || []))
     }
     fetchExperiences()
   }, [])
@@ -734,7 +735,10 @@ function CopyButton({ text }) {
                       : <div className="w-full h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">No image</div>}
                   </div>
                   <p className="text-sm font-medium text-[var(--color-text)] truncate">{exp.name}</p>
-                  <p className="text-xs text-[var(--color-text-muted)]">{exp.date} · {exp.time?.slice(0, 5)}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{exp.upcomingCount > 1 ? 'Next: ' : ''}{exp.date} · {exp.time?.slice(0, 5)}</p>
+                  {exp.upcomingCount > 1 && (
+                    <p className="text-xs text-[var(--color-text-muted)]">+{exp.upcomingCount - 1} more {exp.upcomingCount - 1 === 1 ? 'date' : 'dates'}</p>
+                  )}
                   <p className="text-xs text-[var(--color-text-muted)]">{exp.price == null ? 'Free' : `RM ${Number(exp.price).toFixed(2)}`}</p>
                 </div>
               ))}

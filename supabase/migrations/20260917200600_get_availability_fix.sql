@@ -1,3 +1,6 @@
+-- Fix: Tonda's operating_hours.closed_days is jsonb (Round's is text[]); use the ? operator like
+-- create_reservation_atomic does. Found on first prod run 2026-09-17.
+
 -- get_availability: server-side slot search, mirroring the client math in
 -- src/pages/Reservations.jsx:99-138 (getDateInfo, computeAvailability, getOpenSlots,
 -- getFixedSlots) and the validation/assignment logic in create_reservation_atomic
@@ -73,7 +76,7 @@ begin
   end if;
 
   select * into v_hours from operating_hours where operating_hours.day_type = v_day_type;
-  if v_hours.closed_days is not null and v_day_name = any(v_hours.closed_days) then
+  if v_hours.closed_days is not null and v_hours.closed_days ? v_day_name then
     return;
   end if;
 

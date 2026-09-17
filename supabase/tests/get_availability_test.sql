@@ -10,10 +10,10 @@ create temp table results (label text);
 -- doesn't depend on live config. Rolled back at the end. 2030-01-07 is a Monday
 -- (weekday for Tonda, whose weekend is Fri/Sat, and not in public_holidays).
 update public.operating_hours
-   set closed_days = '{}', sessions = '[{"label":"Dinner","start":"18:00","end":"20:00","last_booking":"19:00"}]'::jsonb
+   set closed_days = '[]'::jsonb, sessions = '[{"label":"Dinner","start":"18:00","end":"20:00","last_booking":"19:00"}]'::jsonb
  where day_type = 'weekday';
 insert into public.operating_hours (day_type, is_closed, closed_days, sessions)
-  select 'weekday', false, '{}'::text[], '[{"label":"Dinner","start":"18:00","end":"20:00","last_booking":"19:00"}]'::jsonb
+  select 'weekday', false, '[]'::jsonb, '[{"label":"Dinner","start":"18:00","end":"20:00","last_booking":"19:00"}]'::jsonb
   where not exists (select 1 from public.operating_hours where day_type = 'weekday');
 
 update public.slot_rules

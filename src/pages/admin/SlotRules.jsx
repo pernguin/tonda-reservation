@@ -5,8 +5,7 @@ import SaveButton from '../../components/admin/SaveButton'
 import { Loading } from '../../components/admin/States'
 import { useSavedFlash } from '../../lib/useSavedFlash'
 import { BRAND } from '../../lib/adminTheme'
-
-const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+import { DAYS_BY_TYPE, HIDDEN_DAY_TYPES } from '../../lib/slotRuleDays'
 
 const DEFAULT_CONFIG = [
   {
@@ -83,6 +82,7 @@ export default function SlotRules() {
 
   async function saveAll() {
     for (const c of config) {
+      if (HIDDEN_DAY_TYPES.includes(c.day_type)) continue
       const { data: existingSlot } = await supabase.from('slot_rules').select('id').eq('day_type', c.day_type).maybeSingle()
       if (existingSlot) {
         await supabase.from('slot_rules').update({ rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [], hold_duration_minutes: c.hold_duration_minutes }).eq('day_type', c.day_type)
@@ -188,16 +188,16 @@ export default function SlotRules() {
       actions={<SaveButton saved={saved} onClick={saveAll} />}>
 
       {/* Day Type Cards */}
-      {config.map(c => (
+      {config.filter(c => !HIDDEN_DAY_TYPES.includes(c.day_type)).map(c => (
         <div key={c.day_type} className="border-b border-gray-100 pb-8 mb-8">
           <h2 className="text-lg font-medium text-gray-900 mb-5">{c.label}</h2>
 
           {/* Closed Days */}
-          {c.day_type === 'weekday' && (
+          {DAYS_BY_TYPE[c.day_type] && (
             <div className="mb-5">
               <p className={labelClass}>Closed on</p>
               <div className="flex flex-wrap gap-2 mt-2">
-                {DAYS_OF_WEEK.map(day => (
+                {DAYS_BY_TYPE[c.day_type].map(day => (
                   <button key={day} onClick={() => toggleClosedDay(c.day_type, day)}
                     className="px-3 py-1.5 text-xs font-medium tracking-wide transition-colors rounded"
                     style={c.closed_days?.includes(day)

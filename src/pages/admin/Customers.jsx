@@ -33,6 +33,8 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function formatRM(v) { return v == null ? '—' : `RM ${Number(v).toFixed(2)}` }
+
 function formatBirthday(value) {
   if (!value) return '—'
   const [, month, day] = value.split('-').map(Number)
@@ -287,6 +289,8 @@ export default function Customers() {
         <div className="flex-1 min-w-0 text-xs tracking-widest uppercase text-gray-400">Guest</div>
         <div className="text-xs tracking-widest uppercase text-gray-400 w-20 text-center">Last Visited</div>
         <div className="text-xs tracking-widest uppercase text-gray-400 w-12 text-center">Visits</div>
+        <div className="hidden lg:block text-xs tracking-widest uppercase text-gray-400 w-24 text-right">Total Spent</div>
+        <div className="hidden lg:block text-xs tracking-widest uppercase text-gray-400 w-24 text-right">Last Visit</div>
         <div className="hidden md:block text-xs tracking-widest uppercase text-gray-400 w-16 text-center">Cancel</div>
         <div className="hidden md:block text-xs tracking-widest uppercase text-gray-400 w-16 text-center">No Show</div>
         <div className="hidden md:block text-xs tracking-widest uppercase text-gray-400 w-16 text-center">Birthdate</div>
@@ -314,6 +318,8 @@ export default function Customers() {
               </div>
               <div className="text-xs text-gray-700 w-20 text-center">{formatDate(c.last_visited_at)}</div>
               <div className="text-sm text-gray-700 w-12 text-center">{c.visit_count || 0}</div>
+              <div className="hidden lg:block text-sm text-gray-700 w-24 text-right tabular-nums">{formatRM(c.total_spent)}</div>
+              <div className="hidden lg:block text-sm text-gray-700 w-24 text-right tabular-nums">{formatRM(c.last_visit_spent)}</div>
               <div className="hidden md:block text-sm w-16 text-center" style={{ color: c.cancellation_count > 0 ? BRAND : '#9ca3af' }}>
                 {c.cancellation_count || 0}
               </div>

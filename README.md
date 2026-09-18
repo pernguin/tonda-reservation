@@ -17,9 +17,9 @@ If you are developing a production application, we recommend using TypeScript wi
 
 ## Re-seeding `public_holidays`
 
-`public.public_holidays` overrides a date's `day_type` to `'public_holiday'` inside
-`get_availability` (and should eventually replace the client's own fetch in
-`src/pages/Reservations.jsx`). It is not auto-populated: it must be re-seeded once a
+`public.public_holidays` is currently **not consulted** — the `get_availability` override and the
+client fetch were disabled on 2026-09-18 so public holidays behave as normal days (see
+`docs/superpowers/specs/2026-09-18-ops-tweaks-port-design.md` §3 to restore). It is not auto-populated: it must be re-seeded once a
 year with Malaysian national holiday dates. The original plan was to source these
 from `https://date.nager.at/api/v3/PublicHolidays/<year>/MY`, but as of 2026-09-17
 that API does not cover Malaysia (`AvailableCountries` has no `MY` entry, and

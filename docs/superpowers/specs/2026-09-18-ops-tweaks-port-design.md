@@ -31,7 +31,8 @@ Same six decisions as Round §0. Tonda-specific rulings:
 (import from `../../lib/tableAvailability`, which exists); line 32 label → `'Reservations Today'`.
 
 ## 2. Closed days
-New `src/lib/slotRuleDays.js` + test: byte-identical copies of Round's. `src/pages/admin/SlotRules.jsx`:
+New `src/lib/slotRuleDays.js` + test: copies of Round's with Tonda's day lists: weekday Sun–Thu,
+weekend Fri–Sat (Tonda's weekend is Friday/Saturday). `src/pages/admin/SlotRules.jsx`:
 line 9 `DAYS_OF_WEEK` removed → import; gate at line 196 `c.day_type === 'weekday'` →
 `DAYS_BY_TYPE[c.day_type]`; the `DAYS_OF_WEEK.map` below it → `DAYS_BY_TYPE[c.day_type].map`;
 `saveAll()` loop (line 85) skips `HIDDEN_DAY_TYPES`; render `config.map` (line 191) → filtered.

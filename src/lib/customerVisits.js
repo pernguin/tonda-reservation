@@ -1,12 +1,33 @@
 import { supabaseCustomers } from '../supabaseCustomers'
 
-export async function logVisitFromReservation(reservation, newStatus, restaurant) {
+export function nextSpend(customer, amountSpent, shouldUpdateLastVisited) {
+  return {
+    total_spent: (Number(customer.total_spent) || 0) + amountSpent,
+    ...(shouldUpdateLastVisited ? { last_visit_spent: amountSpent } : {})
+  }
+}
+
+// visited_at is a date with no time, so a same-day visit counts as the latest.
+export function isLatestVisit(visitedAt, lastVisitedAt) {
+  return !lastVisitedAt || new Date(visitedAt) >= new Date(lastVisitedAt)
+}
+
+export async function logVisitFromReservation(reservation, newStatus, restaurant, amountSpent = null) {
   if (newStatus !== 'completed' && newStatus !== 'no_show') return
   if (!reservation?.customer_id) return
 
+  // Reservations in this app store the date as `reservation_date`; fall back to it
+  // when a generic `date` field isn't present.
+  const visitedAt = reservation.date ?? reservation.reservation_date
+
   try {
-    const visitedAt = reservation.date ?? reservation.reservation_date
-    const pax = reservation.pax ?? reservation.guest_count ?? reservation.guests ?? null
+    const { data: existing } = await supabaseCustomers
+      .from('customer_visits')
+      .select('status')
+      .eq('reservation_id', reservation.id)
+      .maybeSingle()
+
+    if (existing && existing.status === newStatus) return
 
     const { error: upsertError } = await supabaseCustomers
       .from('customer_visits')
@@ -16,53 +37,38 @@ export async function logVisitFromReservation(reservation, newStatus, restaurant
         visited_at: visitedAt,
         reservation_id: reservation.id,
         status: newStatus,
-        pax
+        pax: reservation.pax ?? reservation.guest_count ?? reservation.guests ?? null,
+        amount_spent: newStatus === 'completed' ? amountSpent : null
       }, { onConflict: 'reservation_id' })
 
-    if (upsertError) {
-      console.error('logVisitFromReservation: upsert failed', upsertError)
-      return
-    }
+    if (upsertError) throw upsertError
 
     const { data: customer, error: fetchError } = await supabaseCustomers
       .from('customers')
-      .select('visit_count, no_show_count, last_visited_at')
+      .select('visit_count, no_show_count, last_visited_at, total_spent, last_visit_spent')
       .eq('id', reservation.customer_id)
       .single()
 
-    if (fetchError || !customer) {
-      console.error('logVisitFromReservation: customer fetch failed', fetchError)
-      return
-    }
+    if (fetchError || !customer) throw fetchError || new Error('customer not found')
 
     if (newStatus === 'completed') {
-      const shouldUpdateLastVisited =
-        !customer.last_visited_at || (visitedAt && visitedAt > customer.last_visited_at)
+      const shouldUpdateLastVisited = isLatestVisit(visitedAt, customer.last_visited_at)
 
-      const updatePayload = {
-        visit_count: (customer.visit_count ?? 0) + 1,
-        ...(shouldUpdateLastVisited ? { last_visited_at: visitedAt } : {})
-      }
-
-      const { error: updateError } = await supabaseCustomers
+      await supabaseCustomers
         .from('customers')
-        .update(updatePayload)
+        .update({
+          visit_count: (customer.visit_count || 0) + 1,
+          ...(shouldUpdateLastVisited ? { last_visited_at: visitedAt } : {}),
+          ...(amountSpent != null ? nextSpend(customer, amountSpent, shouldUpdateLastVisited) : {})
+        })
         .eq('id', reservation.customer_id)
-
-      if (updateError) console.error('logVisitFromReservation: visit_count update failed', updateError)
     } else if (newStatus === 'no_show') {
-      const updatePayload = {
-        no_show_count: (customer.no_show_count ?? 0) + 1
-      }
-
-      const { error: updateError } = await supabaseCustomers
+      await supabaseCustomers
         .from('customers')
-        .update(updatePayload)
+        .update({ no_show_count: (customer.no_show_count || 0) + 1 })
         .eq('id', reservation.customer_id)
-
-      if (updateError) console.error('logVisitFromReservation: no_show_count update failed', updateError)
     }
   } catch (err) {
-    console.error('logVisitFromReservation: unexpected error', err)
+    console.error('logVisitFromReservation failed:', err)
   }
 }

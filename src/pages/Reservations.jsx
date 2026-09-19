@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers, findOrCreateCustomer, isValidPhone } from '../supabaseCustomers'
 import { collapseSeries } from '../lib/experienceSeries'
+import { getDayType } from '../lib/dayType'
 
 async function getDateInfo(date) {
   const dateObj = new Date(date)
   const day = dateObj.getDay()
   const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][day]
-  const year = dateObj.getFullYear()
 
   const { data: blocked } = await supabase
     .from('blocked_dates')
@@ -19,15 +19,7 @@ async function getDateInfo(date) {
   if (blocked?.is_closed) return { closed: true, reason: 'Sorry, reservations are not available on this date.' }
   const max_pax = blocked?.max_pax ?? null
 
-  let day_type = (day === 5 || day === 6) ? 'weekend' : 'weekday'
-  // day 5 = Friday, day 6 = Saturday
-  try {
-    const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/MY`)
-    const holidays = await res.json()
-    if (holidays.some(h => h.date === date)) day_type = 'public_holiday'
-  } catch (e) {
-    console.error('Could not fetch holidays', e)
-  }
+  const day_type = await getDayType(date)
 
   const { data: hours } = await supabase
     .from('operating_hours')

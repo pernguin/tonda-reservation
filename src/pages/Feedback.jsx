@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers as roundSupabase } from '../supabaseCustomers'
+import { voucherExpiry } from '../lib/voucher'
 
 const ROUND_SUPABASE_URL = import.meta.env.VITE_ROUND_SUPABASE_URL
 const ROUND_SUPABASE_ANON_KEY = import.meta.env.VITE_ROUND_SUPABASE_ANON_KEY
@@ -147,9 +148,7 @@ export default function Feedback() {
     let voucherExpiresAt = null
     if (!isRepeatFeedback) {
       voucherCode = generateVoucherCode()
-      const expires = new Date()
-      expires.setMonth(expires.getMonth() + 3)
-      voucherExpiresAt = expires.toISOString()
+      voucherExpiresAt = voucherExpiry()
     }
 
     const basePayload = {

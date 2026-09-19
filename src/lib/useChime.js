@@ -6,12 +6,13 @@ function readPref() {
   try { return localStorage.getItem(STORAGE_KEY) === 'on' } catch { return false }
 }
 
-// Two-tone chime via Web Audio. Browsers block audio until a user gesture, so the
-// AudioContext is created/resumed on the first pointerdown anywhere in the document.
+// Three-note rising chime, repeated once, via Web Audio. Browsers block audio until a user
+// gesture, so the AudioContext is created/resumed on the first pointerdown anywhere in the document.
 export function useChime() {
   const [soundOn, setSoundOn] = useState(readPref)
   const [primed, setPrimed] = useState(false)
   const ctxRef = useRef(null)
+  const busyUntilRef = useRef(0)
 
   const prime = useCallback(() => {
     if (!ctxRef.current) ctxRef.current = new (window.AudioContext || window.webkitAudioContext)()
@@ -40,18 +41,31 @@ export function useChime() {
   const play = useCallback(() => {
     const ctx = ctxRef.current
     if (!ctx || ctx.state !== 'running') return
-    const tone = (freq, at) => {
+    if (ctx.currentTime < busyUntilRef.current) return
+    const tone = (freq, at, dur = 0.16) => {
       const osc = ctx.createOscillator()
+      const filter = ctx.createBiquadFilter()
       const gain = ctx.createGain()
+      osc.type = 'square'
       osc.frequency.value = freq
-      gain.gain.setValueAtTime(0.2, at)
-      gain.gain.exponentialRampToValueAtTime(0.001, at + 0.12)
-      osc.connect(gain).connect(ctx.destination)
+      filter.type = 'lowpass'
+      filter.frequency.value = 2400
+      gain.gain.setValueAtTime(0.0001, at)
+      gain.gain.exponentialRampToValueAtTime(0.7, at + 0.01)
+      gain.gain.setValueAtTime(0.7, at + dur - 0.04)
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + dur)
+      osc.connect(filter).connect(gain).connect(ctx.destination)
       osc.start(at)
-      osc.stop(at + 0.12)
+      osc.stop(at + dur)
     }
-    tone(880, ctx.currentTime)
-    tone(1175, ctx.currentTime + 0.14)
+    const t0 = ctx.currentTime
+    ;[0, 1].forEach(rep => {
+      const base = t0 + rep * 0.6
+      tone(660, base)
+      tone(880, base + 0.18)
+      tone(1175, base + 0.36, 0.22)
+    })
+    busyUntilRef.current = t0 + 1.25
   }, [])
 
   return { soundOn, primed, toggle, play }

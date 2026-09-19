@@ -70,7 +70,8 @@ commands only (no `&&`, `$(...)`, `for`, `cd`, `git -C`). Round's files are read
 `C:\Users\User\Projects\round-reservation\<path>` on disk.
 
 ### T1 — Slot-rule day constants (copy)
-**Do:** Copy Round's `src/lib/slotRuleDays.js` and `src/lib/slotRuleDays.test.js` byte-for-byte.
+**Do:** Copy Round's `src/lib/slotRuleDays.js` and `src/lib/slotRuleDays.test.js` with Tonda's day
+lists: weekday Sun–Thu, weekend Fri–Sat (Tonda's weekend is Friday/Saturday).
 **Verify:** `npm test` — 52 pass (48 + 4).
 
 ### T2 — SlotRules page

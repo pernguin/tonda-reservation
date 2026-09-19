@@ -4,6 +4,7 @@ import { supabaseCustomers } from '../../supabaseCustomers'
 import { Link } from 'react-router-dom'
 import AdminPage from '../../components/admin/AdminPage'
 import { BRAND } from '../../lib/adminTheme'
+import { getLocalToday } from '../../lib/tableAvailability'
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -13,7 +14,7 @@ export default function Dashboard() {
   useEffect(() => {
     async function fetchStats() {
       const [r, e, o, c] = await Promise.all([
-        supabase.from('reservations').select('id', { count: 'exact' }),
+        supabase.from('reservations').select('id', { count: 'exact' }).eq('reservation_date', getLocalToday()),
         supabase.from('events').select('id', { count: 'exact' }),
         supabase.from('offsite_bookings').select('id', { count: 'exact' }),
         supabaseCustomers.from('customers').select('id', { count: 'exact' })
@@ -29,7 +30,7 @@ export default function Dashboard() {
   }, [])
 
   const stats_cards = [
-    { label: 'Total Reservations', value: stats.reservations, link: '/admin/bookings' },
+    { label: 'Reservations Today', value: stats.reservations, link: '/admin/bookings' },
     { label: 'Event Enquiries', value: stats.events, link: '/admin/bookings' },
     { label: 'Off-Site Enquiries', value: stats.offsite, link: '/admin/bookings' },
     { label: 'Total Customers', value: stats.customers, link: '/admin/customers' },

@@ -10,6 +10,7 @@ import TabBar from '../../components/admin/TabBar'
 import FilterBar, { FilterField, FILTER_INPUT_CLASS } from '../../components/admin/FilterBar'
 import StatusBadge from '../../components/admin/StatusBadge'
 import { Loading, EmptyState } from '../../components/admin/States'
+import AmountPrompt from '../../components/admin/AmountPrompt'
 
 const STATUS_LABELS = { cancelled: 'cancelled', no_show: 'a no-show' }
 
@@ -196,6 +197,7 @@ export default function Bookings() {
   const [tables, setTables] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
+  const [pendingComplete, setPendingComplete] = useState(null)
   const [showToast, toastNode] = useToast()
   const refetchTimer = useRef(null)
 
@@ -266,7 +268,8 @@ export default function Bookings() {
     setLoading(false)
   }
 
-  async function updateStatus(table, id, status) {
+  async function updateStatus(table, id, status, amountSpent) {
+    if (table === 'reservations' && status === 'completed' && amountSpent === undefined) { setPendingComplete({ table, id }); return }
     if (STATUS_LABELS[status] && !confirm(`Mark this booking as ${STATUS_LABELS[status]}?`)) return
 
     setBusyId(id)
@@ -280,7 +283,7 @@ export default function Bookings() {
     const reservation = table === 'reservations' ? reservations.find(r => r.id === id) : null
 
     if (reservation && (status === 'completed' || status === 'no_show')) {
-      await logVisitFromReservation(reservation, status, 'tonda')
+      await logVisitFromReservation(reservation, status, 'tonda', amountSpent)
     }
 
     // When reservation is completed, release locks and unmerge any merged tables
@@ -433,6 +436,10 @@ export default function Bookings() {
       {loading ? <Loading /> : renderTab()}
 
       {toastNode}
+
+      <AmountPrompt open={!!pendingComplete} title="Complete reservation"
+        onCancel={() => setPendingComplete(null)}
+        onConfirm={amount => { const p = pendingComplete; setPendingComplete(null); updateStatus(p.table, p.id, 'completed', amount) }} />
     </AdminPage>
   )
 }

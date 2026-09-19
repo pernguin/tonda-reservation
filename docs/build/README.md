@@ -2,7 +2,7 @@
 
 | # | Package | Status |
 |---|---------|--------|
-| 01 | [Ops tweaks port (from Round package 01)](01-ops-tweaks-port.md) | not started |
+| 01 | [Ops tweaks port (from Round package 01)](01-ops-tweaks-port.md) | in review |
 
 ## Rules for every package
 - Branch per package: `build/NN-short-name`.

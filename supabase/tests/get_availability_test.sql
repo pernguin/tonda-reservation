@@ -75,6 +75,24 @@ begin
 end;
 $$;
 
+-- PH: a public_holidays row for the fixture date no longer overrides day_type --
+-- get_availability keeps applying weekday config (the override was removed
+-- 2026-09-18, see 20260918100000_get_availability_no_ph.sql).
+insert into public.public_holidays (holiday_date, name)
+values (date '2030-01-07', 'Test Fixture Holiday');
+
+do $$
+declare n int;
+begin
+  select count(*) into n from public.get_availability(date '2030-01-07', 2);
+  if n < 1 then
+    raise exception 'PH expected weekday config to still apply on a public_holidays date, got %', n;
+  end if;
+
+  insert into results values ('PH date returns weekday slots: passed');
+end;
+$$;
+
 -- T3: a blocked_dates row with is_closed=true yields no slots at all, regardless of
 -- guest count or remaining capacity.
 insert into public.blocked_dates (blocked_date, is_closed, date_type)

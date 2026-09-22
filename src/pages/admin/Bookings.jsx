@@ -51,6 +51,13 @@ function ActionButtons({ table, id, busyId, updateStatus }) {
   )
 }
 
+// "22 Sep" from a YYYY-MM-DD string, for the list column.
+function shortDate(dateStr) {
+  if (!dateStr) return ''
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
 // Reservation list row
 function ReservationRow({ r, tables, busyId, updateStatus }) {
   const [expanded, setExpanded] = useState(false)
@@ -64,6 +71,7 @@ function ReservationRow({ r, tables, busyId, updateStatus }) {
         {/* Time */}
         <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
           {r.reservation_time?.slice(0, 5)}
+          <p className="text-gray-500 font-normal">{shortDate(r.reservation_date)}</p>
         </div>
         {/* Name + phone */}
         <div className="flex-1 min-w-0">
@@ -119,6 +127,7 @@ function EventRow({ e, busyId, updateStatus }) {
         onClick={() => setExpanded(!expanded)}>
         <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
           {e.event_time?.slice(0, 5)}
+          <p className="text-gray-500 font-normal">{shortDate(e.event_date)}</p>
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{e.customers?.full_name}</p>
@@ -153,6 +162,7 @@ function OffsiteRow({ o, busyId, updateStatus }) {
         onClick={() => setExpanded(!expanded)}>
         <div className="w-16 text-xs text-gray-400 font-medium shrink-0">
           {o.event_time?.slice(0, 5)}
+          <p className="text-gray-500 font-normal">{shortDate(o.event_date)}</p>
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{o.customers?.full_name}</p>
@@ -179,7 +189,7 @@ function OffsiteRow({ o, busyId, updateStatus }) {
 function ListHeader({ showTable = true }) {
   return (
     <div className="flex items-center gap-4 py-2 border-b border-gray-200 mb-1">
-      <div className="w-16 text-xs tracking-widest uppercase text-gray-400">Time</div>
+      <div className="w-16 text-xs tracking-widest uppercase text-gray-400">When</div>
       <div className="flex-1 text-xs tracking-widest uppercase text-gray-400">Guest</div>
       <div className="text-xs tracking-widest uppercase text-gray-400 shrink-0">Pax</div>
       <div className="w-16 text-xs tracking-widest uppercase text-gray-400 text-right shrink-0">

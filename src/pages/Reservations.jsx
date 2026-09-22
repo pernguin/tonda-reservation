@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers, findOrCreateCustomer, isValidPhone } from '../supabaseCustomers'
-import { collapseSeries } from '../lib/experienceSeries'
+import { collapseSeries, addDays } from '../lib/experienceSeries'
+import { getLocalToday } from '../lib/tableAvailability'
 import { getDayType } from '../lib/dayType'
 
 async function getDateInfo(date) {
@@ -242,6 +243,9 @@ function isTimeWithinSessions(time, sessions) {
 const BRAND = 'var(--color-accent)'
 const CREAM = 'var(--color-bg)'
 
+// Guests can book at most this many days ahead (public form only).
+const MAX_ADVANCE_DAYS = 60
+
 function normalisePhone(raw) {
   let p = raw.replace(/[\s\-\(\)]/g, '')
   if (p.startsWith('+')) p = p.slice(1)
@@ -351,6 +355,11 @@ export default function Reservations() {
     setAvailableGroups([])
     setSearchError(null)
     if (!date || !guestsRaw) return
+    if (date > addDays(getLocalToday(), MAX_ADVANCE_DAYS)) {
+      setSearchError(`Reservations can be made up to ${MAX_ADVANCE_DAYS} days in advance.`)
+      setHasSearched(true)
+      return
+    }
 
     setSearchLoading(true)
     const info = await getDateInfo(date)
@@ -556,6 +565,7 @@ function CopyButton({ text }) {
                 <label className={labelClass}>Date *</label>
                 <input name="reservation_date" type="date" value={form.reservation_date}
                   onChange={handleSearchDateChange} required
+                  max={addDays(getLocalToday(), MAX_ADVANCE_DAYS)}
                   disabled={lookupStatus === 'loading'}
                   className={inputClass} />
               </div>

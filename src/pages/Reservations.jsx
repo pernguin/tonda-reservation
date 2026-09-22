@@ -355,6 +355,11 @@ export default function Reservations() {
     setAvailableGroups([])
     setSearchError(null)
     if (!date || !guestsRaw) return
+    if (date < getLocalToday()) {
+      setSearchError('That date has already passed.')
+      setHasSearched(true)
+      return
+    }
     if (date > addDays(getLocalToday(), MAX_ADVANCE_DAYS)) {
       setSearchError(`Reservations can be made up to ${MAX_ADVANCE_DAYS} days in advance.`)
       setHasSearched(true)
@@ -565,6 +570,7 @@ function CopyButton({ text }) {
                 <label className={labelClass}>Date *</label>
                 <input name="reservation_date" type="date" value={form.reservation_date}
                   onChange={handleSearchDateChange} required
+                  min={getLocalToday()}
                   max={addDays(getLocalToday(), MAX_ADVANCE_DAYS)}
                   disabled={lookupStatus === 'loading'}
                   className={inputClass} />

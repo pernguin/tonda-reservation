@@ -13,6 +13,7 @@ import Tables from './pages/admin/Tables'
 import Bookings from './pages/admin/Bookings'
 import SlotRules from './pages/admin/SlotRules'
 import Customers from './pages/admin/Customers'
+import AdminFeedback from './pages/admin/Feedback'
 import Login from './pages/admin/Login'
 import RequireAuth from './components/RequireAuth'
 import NewBookingAlert from './components/NewBookingAlert'
@@ -42,6 +43,7 @@ function Layout() {
         <Route path="/admin/bookings" element={<RequireAuth><Bookings /></RequireAuth>} />
         <Route path="/admin/slot-rules" element={<RequireAuth><SlotRules /></RequireAuth>} />
         <Route path="/admin/customers" element={<RequireAuth><Customers /></RequireAuth>} />
+        <Route path="/admin/feedback" element={<RequireAuth><AdminFeedback /></RequireAuth>} />
         <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
         <Route path="/admin/experiences" element={<RequireAuth><Experiences /></RequireAuth>} />
       </Routes>

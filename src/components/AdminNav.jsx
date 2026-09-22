@@ -12,6 +12,7 @@ export default function AdminNav({ unseenCount = 0, soundOn = false, onToggleSou
           { to: '/admin/tables', label: 'Floor Plan' },
           { to: '/admin/slot-rules', label: 'Slot Rules' },
           { to: '/admin/customers', label: 'Customers' },
+          { to: '/admin/feedback', label: 'Feedback' },
           { href: 'https://round-reservation.vercel.app/admin/feedback', label: 'Feedback' },
           { to: '/admin/settings', label: 'Settings' },
         ].map(({ to, href, label }) =>

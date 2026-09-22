@@ -5,6 +5,7 @@ import { supabaseCustomers, findOrCreateCustomer, isValidPhone } from '../supaba
 import { collapseSeries, addDays } from '../lib/experienceSeries'
 import { getLocalToday } from '../lib/tableAvailability'
 import { getDayType } from '../lib/dayType'
+import { isSlotBookable } from '../lib/slotCutoff'
 
 async function getDateInfo(date) {
   const dateObj = new Date(date)
@@ -161,6 +162,7 @@ async function searchAvailability(date, guestCount, durationMinutes, slotGroups)
     .map(group => ({
       sessionLabel: group.sessionLabel,
       slots: group.slots.filter(slot =>
+        isSlotBookable(slot.value, date) &&
         computeAvailability(existing || [], totalSmallCapacity, blackoutWindows, date, slot.value, guestCount, durationMinutes).available
       )
     }))

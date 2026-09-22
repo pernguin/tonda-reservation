@@ -11,6 +11,7 @@ import FilterBar, { FilterField, FILTER_INPUT_CLASS } from '../../components/adm
 import StatusBadge from '../../components/admin/StatusBadge'
 import { Loading, EmptyState } from '../../components/admin/States'
 import AmountPrompt from '../../components/admin/AmountPrompt'
+import EditReservationForm from '../../components/admin/EditReservationForm'
 
 const STATUS_LABELS = { cancelled: 'cancelled', no_show: 'a no-show' }
 
@@ -59,8 +60,9 @@ function shortDate(dateStr) {
 }
 
 // Reservation list row
-function ReservationRow({ r, tables, busyId, updateStatus }) {
+function ReservationRow({ r, tables, busyId, updateStatus, onAmended }) {
   const [expanded, setExpanded] = useState(false)
+  const [editing, setEditing] = useState(false)
   const tableNums = getTableNumbers(r.table_ids, tables)
 
   return (
@@ -108,6 +110,15 @@ function ReservationRow({ r, tables, busyId, updateStatus }) {
           {tableNums && <p className="text-xs text-gray-500 mb-2">🪑 {tableNums}</p>}
           {r.needs_manual_assignment && (
             <p className="text-xs text-amber-700 mb-2">⚠️ Auto-assignment couldn't secure a table for this booking — assign one manually below.</p>
+          )}
+          {editing ? (
+            <EditReservationForm r={r} onCancel={() => setEditing(false)}
+              onSaved={() => { setEditing(false); onAmended() }} />
+          ) : (
+            <button type="button" onClick={e => { e.stopPropagation(); setEditing(true) }}
+              className="text-xs font-medium tracking-wide text-gray-500 hover:text-gray-800 mb-3 block">
+              Edit details
+            </button>
           )}
           <ActionButtons table="reservations" id={r.id} busyId={busyId} updateStatus={updateStatus} />
         </div>
@@ -375,7 +386,7 @@ export default function Bookings() {
       return (
         <>
           <ListHeader showTable={true} />
-          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} />)}
+          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} onAmended={fetchAll} />)}
           {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
           {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
         </>
@@ -389,7 +400,7 @@ export default function Bookings() {
       return (
         <>
           <ListHeader showTable={true} />
-          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} />)}
+          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} onAmended={fetchAll} />)}
           {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
           {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
         </>

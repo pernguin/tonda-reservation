@@ -3,7 +3,7 @@
 | # | Package | Status |
 |---|---------|--------|
 | 01 | [Ops tweaks port (from Round package 01)](01-ops-tweaks-port.md) | done (PR #3, migrated 2026-09-19) |
-| 02 | [Guest tags port (from Round packages 02 + 03)](02-guest-tags-port.md) | built — awaiting smoke |
+| 02 | [Guest tags port (from Round packages 02 + 03)](02-guest-tags-port.md) | done (PR #4, smoke-tested 2026-09-24) |
 
 ## Rules for every package
 - Branch per package: `build/NN-short-name`.

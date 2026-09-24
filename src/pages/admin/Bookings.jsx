@@ -12,6 +12,8 @@ import StatusBadge from '../../components/admin/StatusBadge'
 import { Loading, EmptyState } from '../../components/admin/States'
 import AmountPrompt from '../../components/admin/AmountPrompt'
 import EditReservationForm from '../../components/admin/EditReservationForm'
+import GuestPills from '../../components/admin/GuestPills'
+import GuestBlock from '../../components/admin/GuestBlock'
 
 const STATUS_LABELS = { cancelled: 'cancelled', no_show: 'a no-show' }
 
@@ -60,7 +62,7 @@ function shortDate(dateStr) {
 }
 
 // Reservation list row
-function ReservationRow({ r, tables, busyId, updateStatus, onAmended }) {
+function ReservationRow({ r, tables, busyId, updateStatus, onAmended, today, showToast, onGuestSaved }) {
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
   const tableNums = getTableNumbers(r.table_ids, tables)
@@ -79,6 +81,7 @@ function ReservationRow({ r, tables, busyId, updateStatus, onAmended }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{r.customers?.full_name}</p>
           <p className="text-xs text-gray-400">{r.customers?.phone}</p>
+          <GuestPills customer={r.customers} booking={{ status: r.status, date: r.reservation_date }} today={today} />
         </div>
         {/* Guests */}
         <div className="text-xs text-gray-500 shrink-0">
@@ -120,6 +123,7 @@ function ReservationRow({ r, tables, busyId, updateStatus, onAmended }) {
               Edit details
             </button>
           )}
+          <GuestBlock customer={r.customers} onSaved={onGuestSaved} showToast={showToast} />
           <ActionButtons table="reservations" id={r.id} busyId={busyId} updateStatus={updateStatus} />
         </div>
       )}
@@ -128,7 +132,7 @@ function ReservationRow({ r, tables, busyId, updateStatus, onAmended }) {
 }
 
 // Event list row
-function EventRow({ e, busyId, updateStatus }) {
+function EventRow({ e, busyId, updateStatus, today, showToast, onGuestSaved }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -143,6 +147,7 @@ function EventRow({ e, busyId, updateStatus }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{e.customers?.full_name}</p>
           <p className="text-xs text-gray-400">{e.customers?.phone}</p>
+          <GuestPills customer={e.customers} booking={{ status: e.status, date: e.event_date }} today={today} />
         </div>
         <div className="text-xs text-gray-500 shrink-0">👥 {e.guest_count}</div>
         <div className="w-16 text-xs text-gray-500 shrink-0 text-right capitalize">{e.event_type}</div>
@@ -155,6 +160,7 @@ function EventRow({ e, busyId, updateStatus }) {
           {e.budget_range && <p className="text-xs text-gray-500 mb-1">💰 {e.budget_range}</p>}
           {e.special_requests && <p className="text-xs text-gray-500 mb-1">📝 {e.special_requests}</p>}
           <p className="text-xs text-gray-500 mb-2">📞 {e.preferred_contact} · {e.best_time_to_reach}</p>
+          <GuestBlock customer={e.customers} onSaved={onGuestSaved} showToast={showToast} />
           <ActionButtons table="events" id={e.id} busyId={busyId} updateStatus={updateStatus} />
         </div>
       )}
@@ -163,7 +169,7 @@ function EventRow({ e, busyId, updateStatus }) {
 }
 
 // Offsite list row
-function OffsiteRow({ o, busyId, updateStatus }) {
+function OffsiteRow({ o, busyId, updateStatus, today, showToast, onGuestSaved }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -178,6 +184,7 @@ function OffsiteRow({ o, busyId, updateStatus }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{o.customers?.full_name}</p>
           <p className="text-xs text-gray-400">{o.customers?.phone}</p>
+          <GuestPills customer={o.customers} booking={{ status: o.status, date: o.event_date }} today={today} />
         </div>
         <div className="text-xs text-gray-500 shrink-0">👥 {o.guest_count}</div>
         <div className="w-16 text-xs text-gray-500 shrink-0 text-right capitalize">{o.event_type}</div>
@@ -189,6 +196,7 @@ function OffsiteRow({ o, busyId, updateStatus }) {
           {o.customers?.email && <p className="text-xs text-gray-500 mb-1">✉️ {o.customers.email}</p>}
           <p className="text-xs text-gray-500 mb-1">📍 {o.venue_address}</p>
           {o.special_requests && <p className="text-xs text-gray-500 mb-1">📝 {o.special_requests}</p>}
+          <GuestBlock customer={o.customers} onSaved={onGuestSaved} showToast={showToast} />
           <ActionButtons table="offsite_bookings" id={o.id} busyId={busyId} updateStatus={updateStatus} />
         </div>
       )}
@@ -272,7 +280,7 @@ export default function Bookings() {
     if (customerIds.length > 0) {
       const { data: customersData, error: customersError } = await supabaseCustomers
         .from('customers')
-        .select('id, full_name, phone, email')
+        .select('id, full_name, phone, email, visit_count, no_show_count, birthdate, notes, tags')
         .in('id', customerIds)
       if (customersError) {
         showToast('Could not load bookings: ' + customersError.message)
@@ -386,9 +394,9 @@ export default function Bookings() {
       return (
         <>
           <ListHeader showTable={true} />
-          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} onAmended={fetchAll} />)}
-          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
-          {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
+          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} onAmended={fetchAll} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
+          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
+          {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
         </>
       )
     }
@@ -400,9 +408,9 @@ export default function Bookings() {
       return (
         <>
           <ListHeader showTable={true} />
-          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} onAmended={fetchAll} />)}
-          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
-          {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
+          {res.map(r  => <ReservationRow key={r.id} r={r} tables={tables} busyId={busyId} updateStatus={updateStatus} onAmended={fetchAll} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
+          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
+          {off.map(o  => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
         </>
       )
     }
@@ -412,7 +420,7 @@ export default function Bookings() {
       return (
         <>
           <ListHeader showTable={false} />
-          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} />)}
+          {evts.map(e => <EventRow key={e.id} e={e} busyId={busyId} updateStatus={updateStatus} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
         </>
       )
     }
@@ -422,7 +430,7 @@ export default function Bookings() {
       return (
         <>
           <ListHeader showTable={false} />
-          {off.map(o => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} />)}
+          {off.map(o => <OffsiteRow key={o.id} o={o} busyId={busyId} updateStatus={updateStatus} today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })} />)}
         </>
       )
     }

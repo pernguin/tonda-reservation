@@ -48,8 +48,8 @@ and `docs/build/03-birthday-exact-day.md` (03 overrides the spec's birthday rule
 
 ## Tasks
 
-Global: work only in the files named; `npm test` must pass; `npm run lint` ≤ **14 problems
-(10 errors / 4 warnings)** — Tonda's baseline; `npm run build` must succeed. Stage by path. Commit
+Global: work only in the files named; `npm test` must pass; `npm run lint` ≤ **16 problems
+(11 errors / 5 warnings)** — Tonda's measured baseline on 2026-09-24 (CLAUDE.md still says 14); `npm run build` must succeed. Stage by path. Commit
 message ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Match surrounding style.
 Copy Round files from `C:\Users\User\Projects\round-reservation` (`origin/main`), never from memory.
 
@@ -62,7 +62,7 @@ No logic changes.
 
 ### T2 — Copy `GuestPills.jsx`
 **Do:** Copy Round's `src/components/admin/GuestPills.jsx` verbatim.
-**Verify:** `npm run build`; `npm run lint` ≤ 14.
+**Verify:** `npm run build`; `npm run lint` ≤ 16.
 
 ### T3 — Port `GuestBlock.jsx` with the Round-project client
 **Do:** Copy Round's `src/components/admin/GuestBlock.jsx`. Replace
@@ -70,7 +70,7 @@ No logic changes.
 `import { supabaseCustomers } from '../../supabaseCustomers'` and every `supabase.from('customers')`
 with `supabaseCustomers.from('customers')`. Nothing else changes (heading text "Round & Tonda" is
 correct as is).
-**Verify:** `npm run build`; `npm run lint` ≤ 14; `grep -c "supabaseCustomers.from('customers')" src/components/admin/GuestBlock.jsx` equals the number of `.update(` calls in the file; `grep -n "from '../../supabase'" src/components/admin/GuestBlock.jsx` empty.
+**Verify:** `npm run build`; `npm run lint` ≤ 16; `grep -c "supabaseCustomers.from('customers')" src/components/admin/GuestBlock.jsx` equals the number of `.update(` calls in the file; `grep -n "from '../../supabase'" src/components/admin/GuestBlock.jsx` empty.
 
 ### T4 — Wire into `Bookings.jsx`
 **Do:** Mirror Round PR #5's `src/pages/admin/Bookings.jsx` changes (`git -C C:/Users/User/Projects/round-reservation show 1c47601 -- src/pages/admin/Bookings.jsx`), adapted:
@@ -86,7 +86,7 @@ correct as is).
   before `<ActionButtons …>` in each expanded block.
 - `renderTab()` passes `today={today} showToast={showToast} onGuestSaved={() => fetchAll({ silent: true })}`
   to every row in every tab. `today` is the existing `getLocalToday()` value.
-**Verify:** `npm run build`; `npm run lint` ≤ 14; `grep -c "<GuestPills" src/pages/admin/Bookings.jsx` = 3;
+**Verify:** `npm run build`; `npm run lint` ≤ 16; `grep -c "<GuestPills" src/pages/admin/Bookings.jsx` = 3;
 `grep -c "<GuestBlock" src/pages/admin/Bookings.jsx` = 3;
 `grep -c "visit_count, no_show_count, birthdate, notes, tags" src/pages/admin/Bookings.jsx` = 1.
 
@@ -96,7 +96,7 @@ correct as is).
 
 ## Verify (whole package)
 
-- `npm test`, `npm run build`, `npm run lint` ≤ 14.
+- `npm test`, `npm run build`, `npm run lint` ≤ 16.
 - No migration. Owner smoke on Tonda's dev server against real data: pills appear; tagging a guest in
   Tonda shows the same tag on that guest's Round bookings (shared record); a booking dated a guest's
   birthday shows `🎂 Birthday`; notes survive a collapse.

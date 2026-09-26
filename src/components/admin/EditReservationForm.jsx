@@ -99,14 +99,14 @@ export default function EditReservationForm({ r, onSaved, onCancel }) {
 
       {error && <p className="text-xs mb-3" style={{ color: BRAND }}>{error}</p>}
 
-      <div className="flex gap-4">
+      <div className="flex gap-3">
         <button type="button" onClick={save} disabled={saving || unchanged}
-          className="text-xs font-medium tracking-wide disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ color: BRAND }}>
+          className="px-6 py-3 text-xs font-medium tracking-widest uppercase text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ backgroundColor: BRAND }}>
           {saving ? 'Saving…' : 'Save changes'}
         </button>
         <button type="button" onClick={onCancel} disabled={saving}
-          className="text-xs font-medium tracking-wide text-gray-400 hover:text-gray-600 disabled:opacity-40">
+          className="px-5 py-3 text-xs font-medium tracking-widest uppercase border border-gray-200 text-gray-600 rounded-full hover:bg-gray-50 disabled:opacity-40">
           Cancel
         </button>
       </div>

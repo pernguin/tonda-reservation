@@ -29,3 +29,10 @@ Round. Build in Round first, then port here deliberately (see `docs/build/`).
 - invariant greps: toISOString\(\)\.slice\(0, ?10\) ; day_type === 'public_holiday' ; = any\(v_hours\.closed_days\)
 - dev server: npm run dev -- --port 31NN
 - worktree Bash quirk: inside a worktree the Bash tool refuses `&&`, `$(...)`, `for`, `cd`, `git -C`; single plain commands. Stage by path, never `git add -A`.
+
+## Project Relationships
+
+### Round & Tonda (mirrored reservation apps)
+
+- Round and Tonda are mirrored projects but NOT identical: weekday lists, opening hours, integrations (only Tonda has Grab) and ported features differ. When porting a spec from Round to Tonda, explicitly diff config and business rules, never copy them blindly.
+- Before debugging 'broken' behaviour, confirm which site the user is testing on and whether the feature has been ported there yet.

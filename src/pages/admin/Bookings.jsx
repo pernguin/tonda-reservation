@@ -5,6 +5,7 @@ import { logVisitFromReservation } from '../../lib/customerVisits'
 import { getLocalToday } from '../../lib/tableAvailability'
 import { useUrlStateBatch } from '../../lib/useUrlState'
 import { useToast } from '../../lib/useToast'
+import { BRAND } from '../../lib/adminTheme'
 import AdminPage from '../../components/admin/AdminPage'
 import TabBar from '../../components/admin/TabBar'
 import FilterBar, { FilterField, FILTER_INPUT_CLASS } from '../../components/admin/FilterBar'
@@ -119,8 +120,9 @@ function ReservationRow({ r, tables, busyId, updateStatus, onAmended, today, sho
               onSaved={() => { setEditing(false); onAmended() }} />
           ) : (
             <button type="button" onClick={e => { e.stopPropagation(); setEditing(true) }}
-              className="text-xs font-medium tracking-wide text-gray-500 hover:text-gray-800 mb-3 block">
-              Edit details
+              className="block w-fit px-5 py-2.5 mb-3 text-xs font-medium tracking-widest uppercase rounded-full border hover:opacity-80 transition-opacity"
+              style={{ borderColor: BRAND, color: BRAND }}>
+              ✏️ Edit reservation
             </button>
           )}
           <GuestBlock customer={r.customers} onSaved={onGuestSaved} showToast={showToast} />

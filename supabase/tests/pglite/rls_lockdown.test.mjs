@@ -71,4 +71,65 @@ export default async function ({ db, q, expectError, readMigration }) {
   await assertStructure('after second apply')
   await db.exec(await readMigration(MIGRATION))
   await assertStructure('after third apply (idempotent)')
+
+  // T6: anon.
+  const RLS = /row-level security/
+  const count = async (t) => (await q(`select count(*)::int as n from public.${t}`))[0].n
+
+  await asRole('anon', async () => {
+    assert.equal(await count('reservations'), 0, 'anon cannot select reservations')
+    await expectError(`insert into public.reservations (status) values ('pending')`, [], RLS)
+    assert.equal((await db.query(`update public.reservations set status = 'cancelled'`)).affectedRows, 0)
+    assert.equal((await db.query(`delete from public.reservations`)).affectedRows, 0)
+
+    await db.query(`insert into public.events (event_type) values ('birthday')`)
+    await expectError(`insert into public.events (event_type) values ('x') returning id`, [], RLS)
+    await db.query(`insert into public.offsite_bookings (event_type) values ('birthday')`)
+    await db.query(`insert into public.experience_registrations (name) values ('Test')`)
+
+    for (const t of ['events', 'offsite_bookings', 'experience_registrations', 'restaurant_tables', 'table_blocks', 'table_groups', 'customers']) {
+      assert.equal(await count(t), 0, `anon cannot select ${t}`)
+    }
+
+    const keys = (await q('select key from public.settings')).map((r) => r.key)
+    assert.deepEqual(keys, ['confirmation_message_event'])
+
+    for (const t of ['operating_hours', 'slot_rules', 'blocked_dates', 'blackout_dates', 'experiences', 'public_holidays']) {
+      assert.ok((await count(t)) >= 1, `anon can read ${t}`)
+    }
+    await expectError(`insert into public.slot_rules (day_type) values ('x')`, [], RLS)
+    await expectError(`insert into public.restaurant_tables (table_number) values ('X')`, [], RLS)
+  })
+  const [untouched] = await q(`select count(*)::int as n from public.reservations where status = 'confirmed' and reservation_date = '2030-01-07'`)
+  assert.ok(untouched.n >= 1, 'seed reservation untouched by anon')
+
+  const [claim] = await q(`select has_function_privilege('anon', 'public.claim_restaurant_tables(uuid[],uuid,timestamptz,timestamptz)', 'execute') as ok`)
+  assert.equal(claim.ok, false, 'anon cannot execute claim_restaurant_tables')
+  const [claimAuth] = await q(`select has_function_privilege('authenticated', 'public.claim_restaurant_tables(uuid[],uuid,timestamptz,timestamptz)', 'execute') as ok`)
+  assert.equal(claimAuth.ok, true)
+
+  // T7: authenticated and definer paths.
+  await asRole('authenticated', async () => {
+    assert.ok((await count('reservations')) >= 1)
+    await db.query(`insert into public.reservations (status) values ('pending')`)
+    assert.ok((await db.query(`update public.reservations set status = 'cancelled' where status = 'pending'`)).affectedRows >= 1)
+    assert.ok((await db.query(`delete from public.reservations where status = 'cancelled'`)).affectedRows >= 1)
+    await db.query(`insert into public.restaurant_tables (table_number) values ('AUTH')`)
+    assert.equal((await db.query(`update public.restaurant_tables set table_number = 'AUTH2' where table_number = 'AUTH'`)).affectedRows, 1)
+    assert.equal((await db.query(`delete from public.restaurant_tables where table_number = 'AUTH2'`)).affectedRows, 1)
+    const keys = (await q('select key from public.settings order by key')).map((r) => r.key)
+    assert.ok(keys.includes('staff_alert_email') && keys.includes('confirmation_message_event'))
+    assert.ok((await count('events')) >= 1)
+  })
+
+  await asRole('anon', async () => {
+    const slots = await q(`select slot::text as slot from public.get_availability('2030-01-07', 2)`)
+    assert.ok(slots.length > 0, 'get_availability returns slots for anon via definer')
+    assert.equal(await count('reservations'), 0, 'anon still cannot read reservations directly')
+  })
+  const [seedRes] = await q(`select id from public.reservations where status = 'confirmed' and reservation_date = '2030-01-07' limit 1`)
+  await asRole('anon', async () => {
+    const [r] = await q('select public.cancel_reservation($1) as ok', [seedRes.id])
+    assert.equal(r.ok, true, 'cancel_reservation works for anon via definer')
+  })
 }

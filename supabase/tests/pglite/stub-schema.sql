@@ -112,3 +112,5 @@ returns setof uuid language sql security definer as $$ select null::uuid where f
 
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to anon, authenticated;alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated;
+-- Supabase grants execute to anon explicitly by default; the lockdown migration must revoke it.
+grant execute on function public.claim_restaurant_tables(uuid[], uuid, timestamptz, timestamptz) to anon, authenticated;

@@ -33,14 +33,20 @@ function getTableNumbers(tableIds, tables) {
 async function releaseTables(reservation) {
   const ids = reservation?.table_ids
   if (!Array.isArray(ids) || ids.length === 0) return null
-  const { error: lockError } = await supabase.from('restaurant_tables')
-    .update({ locked_until: null, locked_by_reservation: null }).in('id', ids)
+  // Only tables still locked by this booking: stale table_ids may point at tables since given to another booking.
+  const { data: released, error: lockError } = await supabase.from('restaurant_tables')
+    .update({ locked_until: null, locked_by_reservation: null })
+    .in('id', ids).eq('locked_by_reservation', reservation.id).select('id, group_id')
   if (lockError) return lockError
-  const { data: grouped, error: groupError } = await supabase.from('restaurant_tables')
-    .select('id, group_id').in('id', ids).not('group_id', 'is', null)
+  const candidateGroupIds = [...new Set((released || []).map(t => t.group_id).filter(Boolean))]
+  if (candidateGroupIds.length === 0) return null
+  // Keep a group that still has a table locked by another booking.
+  const { data: stillLocked, error: groupError } = await supabase.from('restaurant_tables')
+    .select('group_id').in('group_id', candidateGroupIds).not('locked_by_reservation', 'is', null)
   if (groupError) return groupError
-  if (!grouped?.length) return null
-  const groupIds = [...new Set(grouped.map(t => t.group_id))]
+  const keep = new Set((stillLocked || []).map(t => t.group_id))
+  const groupIds = candidateGroupIds.filter(g => !keep.has(g))
+  if (groupIds.length === 0) return null
   const { error: clearError } = await supabase.from('restaurant_tables').update({ group_id: null }).in('group_id', groupIds)
   if (clearError) return clearError
   const { error: deleteError } = await supabase.from('table_groups').delete().in('id', groupIds)
@@ -261,6 +267,7 @@ export default function Bookings() {
   const [loadFrom, setLoadFrom] = useState(() => windowStart(getLocalToday()))
   const windowFrom = effectiveWindowStart(loadFrom, filterDate)
   const windowFromRef = useRef(windowFrom)
+  const fetchSeqRef = useRef(0)
 
   useEffect(() => {
     const channel = supabase
@@ -284,6 +291,7 @@ export default function Bookings() {
   }, [windowFrom])
 
   async function fetchAll({ silent = false } = {}) {
+    const seq = ++fetchSeqRef.current
     if (!silent) setLoading(true)
     const [r, e, o, t] = await Promise.all([
       supabase.from('reservations').select('*').gte('reservation_date', windowFromRef.current).order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
@@ -291,6 +299,7 @@ export default function Bookings() {
       supabase.from('offsite_bookings').select('*').order('event_date', { ascending: true }),
       supabase.from('restaurant_tables').select('id, table_number')
     ])
+    if (seq !== fetchSeqRef.current) return
     const failed = [r, e, o, t].find(res => res.error)
     if (failed) {
       showToast('Could not load bookings: ' + failed.error.message)
@@ -316,6 +325,7 @@ export default function Bookings() {
           .select('id, full_name, phone, email, visit_count, no_show_count, birthdate, notes, tags')
           .in('id', ids)
       ))
+      if (seq !== fetchSeqRef.current) return
       const customersFailed = results.find(res => res.error)
       if (customersFailed) {
         showToast('Could not load bookings: ' + customersFailed.error.message)

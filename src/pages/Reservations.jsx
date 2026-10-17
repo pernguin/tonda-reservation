@@ -151,6 +151,22 @@ function normalisePhone(raw) {
 const inputClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors placeholder-[var(--color-text-muted)] disabled:opacity-40 disabled:cursor-not-allowed"
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-[var(--color-text-2)]"
 
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }}
+      className="text-xs tracking-widest uppercase shrink-0 transition-colors"
+      style={{ color: copied ? '#16a34a' : BRAND }}>
+      {copied ? '✓ Copied' : 'Copy'}
+    </button>
+  )
+}
+
 export default function Reservations() {
   const navigate = useNavigate()
   const [form, setForm] = useState({
@@ -183,7 +199,7 @@ export default function Reservations() {
 
   useEffect(() => {
     async function fetchExperiences() {
-      const today = new Date().toISOString().split('T')[0]
+      const today = getLocalToday()
       const { data } = await supabase
         .from('experiences')
         .select('*')
@@ -407,21 +423,6 @@ export default function Reservations() {
       submitLockRef.current = false
       setLoading(false)
     }
-  }
-function CopyButton({ text }) {
-    const [copied, setCopied] = useState(false)
-    return (
-      <button
-        onClick={() => {
-          navigator.clipboard.writeText(text)
-          setCopied(true)
-          setTimeout(() => setCopied(false), 2000)
-        }}
-        className="text-xs tracking-widest uppercase shrink-0 transition-colors"
-        style={{ color: copied ? '#16a34a' : BRAND }}>
-        {copied ? '✓ Copied' : 'Copy'}
-      </button>
-    )
   }
   if (submitted && bookingId) {
     const manageUrl = `${window.location.origin}/booking/${bookingId}`

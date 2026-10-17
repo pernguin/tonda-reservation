@@ -458,3 +458,154 @@ $function$;
 -- Staff-only: the public booking form has no reason to call this.
 revoke execute on function public.amend_reservation_atomic(uuid, date, time, integer, text, integer, boolean) from public, anon;
 grant execute on function public.amend_reservation_atomic(uuid, date, time, integer, text, integer, boolean) to authenticated;
+
+-------------------------------------------------------------------------------
+-- 4. get_availability: no slots for fewer than 1 guest, STABLE, blackouts and
+--    reservations read once per call instead of once per slot.
+-------------------------------------------------------------------------------
+create or replace function public.get_availability(p_date date, p_guest_count int)
+returns table (slot time, day_type text, requires_approval boolean)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_day_type text;
+  v_day_name text;
+  v_blocked record;
+  v_hours record;
+  v_slot_rule record;
+  v_duration_minutes integer;
+  v_total_small_capacity integer;
+  v_session jsonb;
+  v_candidate time;
+  v_last time;
+  v_cur_mins integer;
+  v_last_mins integer;
+  v_booking_start_mins integer;
+  v_booking_end_mins integer;
+  v_blackouts jsonb;
+  v_day_reservations jsonb;
+  v_is_blacked_out boolean;
+  v_booked_small_seats integer;
+  v_big_table_booked boolean;
+begin
+  if p_guest_count < 1 or p_guest_count > 10 then
+    return;
+  end if;
+
+  select * into v_blocked from blocked_dates where blocked_date = p_date;
+  if v_blocked.is_closed then
+    return;
+  end if;
+  if v_blocked.max_pax is not null and p_guest_count > v_blocked.max_pax then
+    return;
+  end if;
+
+  v_day_name := case extract(dow from p_date)::int
+    when 0 then 'Sunday' when 1 then 'Monday' when 2 then 'Tuesday'
+    when 3 then 'Wednesday' when 4 then 'Thursday' when 5 then 'Friday'
+    else 'Saturday' end;
+
+  v_day_type := case when extract(dow from p_date)::int in (5, 6) then 'weekend' else 'weekday' end;
+
+  select * into v_hours from operating_hours where operating_hours.day_type = v_day_type;
+  if v_hours.closed_days is not null and v_hours.closed_days ? v_day_name then
+    return;
+  end if;
+
+  select * into v_slot_rule from slot_rules where slot_rules.day_type = v_day_type;
+  v_duration_minutes := coalesce(v_slot_rule.hold_duration_minutes, 120);
+
+  select coalesce(sum(capacity), 0) into v_total_small_capacity
+  from restaurant_tables
+  where is_bookable = true and table_number <> 'BT' and capacity >= 2;
+
+  -- Read once per call, not once per slot.
+  -- blackout_dates: a row with both times null blacks out the whole date; a row
+  -- with only one bound set treats the missing bound as the day's edge.
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'whole', b.start_time is null and b.end_time is null,
+    's', extract(hour from coalesce(b.start_time, '00:00'::time))::int * 60
+         + extract(minute from coalesce(b.start_time, '00:00'::time))::int,
+    'e', extract(hour from coalesce(b.end_time, '23:59'::time))::int * 60
+         + extract(minute from coalesce(b.end_time, '23:59'::time))::int
+  )), '[]'::jsonb)
+  into v_blackouts
+  from blackout_dates b
+  where b.block_date = p_date;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'start', extract(hour from r.reservation_time)::int * 60 + extract(minute from r.reservation_time)::int,
+    'guests', r.guest_count,
+    'big', coalesce(r.table_type = 'big', false)
+  )), '[]'::jsonb)
+  into v_day_reservations
+  from reservations r
+  where r.reservation_date = p_date
+    and r.status in ('confirmed', 'pending', 'seated');
+
+  -- build the candidate slot list: 'session' rule_type -> one pill per session at
+  -- its start time; otherwise ('open', or no slot_rule row) -> 30-min pills across
+  -- each operating_hours session from start to (last_booking ?? end) inclusive.
+  for v_session in
+    select * from jsonb_array_elements(
+      case when v_slot_rule.rule_type = 'session'
+        then coalesce(v_slot_rule.sessions, '[]'::jsonb)
+        else coalesce(v_hours.sessions, '[]'::jsonb)
+      end
+    )
+  loop
+    if v_slot_rule.rule_type = 'session' then
+      v_candidate := (v_session->>'start')::time;
+      v_last := v_candidate;
+    else
+      v_candidate := (v_session->>'start')::time;
+      v_last := coalesce((v_session->>'last_booking')::time, (v_session->>'end')::time);
+    end if;
+
+    v_cur_mins := extract(hour from v_candidate)::int * 60 + extract(minute from v_candidate)::int;
+    v_last_mins := extract(hour from v_last)::int * 60 + extract(minute from v_last)::int;
+
+    while v_cur_mins <= v_last_mins loop
+      v_candidate := make_time(v_cur_mins / 60, v_cur_mins % 60, 0);
+
+      v_booking_start_mins := v_cur_mins;
+      v_booking_end_mins := v_cur_mins + v_duration_minutes;
+
+      select exists (
+        select 1 from jsonb_array_elements(v_blackouts) b
+        where (b->>'whole')::boolean
+           or (v_booking_start_mins < (b->>'e')::int and v_booking_end_mins > (b->>'s')::int)
+      ) into v_is_blacked_out;
+
+      if not v_is_blacked_out then
+        select
+          coalesce(sum(case when not (x->>'big')::boolean then (x->>'guests')::int else 0 end), 0),
+          coalesce(bool_or((x->>'big')::boolean), false)
+        into v_booked_small_seats, v_big_table_booked
+        from jsonb_array_elements(v_day_reservations) x
+        where (x->>'start')::int < v_booking_end_mins
+          and (x->>'start')::int + v_duration_minutes > v_booking_start_mins;
+
+        if p_guest_count between 6 and 8 and not v_big_table_booked then
+          slot := v_candidate; day_type := v_day_type; requires_approval := false;
+          return next;
+        elsif p_guest_count > 8 and not v_big_table_booked then
+          slot := v_candidate; day_type := v_day_type; requires_approval := true;
+          return next;
+        elsif p_guest_count <= (v_total_small_capacity - v_booked_small_seats) then
+          slot := v_candidate; day_type := v_day_type; requires_approval := false;
+          return next;
+        end if;
+      end if;
+
+      v_cur_mins := v_cur_mins + 30;
+    end loop;
+  end loop;
+
+  return;
+end;
+$$;
+grant execute on function public.get_availability(date, int) to anon, authenticated;

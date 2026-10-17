@@ -48,4 +48,27 @@ export default async function ({ db, q, expectError, readMigration }) {
 
   // Case: migration file exists and applies.
   await db.exec(await readMigration(MIGRATION))
+
+  // T5: structure.
+  const expected = {}
+  for (const t of ['reservations', 'table_groups', 'customers', 'restaurant_tables', 'table_blocks']) expected[t] = ['staff_all']
+  for (const t of ['operating_hours', 'slot_rules', 'blocked_dates', 'blackout_dates', 'experiences', 'public_holidays']) expected[t] = ['anon_select', 'staff_all']
+  expected.settings = ['anon_select_confirmation_messages', 'staff_all']
+  for (const t of ['events', 'offsite_bookings', 'experience_registrations']) expected[t] = ['anon_insert', 'staff_all']
+
+  const assertStructure = async (label) => {
+    const off = await q('select relname from pg_class where relname = any($1) and relkind = $2 and not relrowsecurity', [LOCKED, 'r'])
+    assert.deepEqual(off, [], `${label}: tables without RLS`)
+    const legacy = await q(`select count(*)::int as n from pg_policies where policyname in ('Allow public read', 'Allow public insert')`)
+    assert.equal(legacy[0].n, 0, `${label}: legacy policies remain`)
+    for (const t of LOCKED) {
+      const rows = await q(`select policyname from pg_policies where schemaname = 'public' and tablename = $1 order by policyname`, [t])
+      assert.deepEqual(rows.map((r) => r.policyname), expected[t], `${label}: policies on ${t}`)
+    }
+  }
+
+  // The runner applied the migration before the legacy policies were created, so re-apply: it must drop them.
+  await assertStructure('after second apply')
+  await db.exec(await readMigration(MIGRATION))
+  await assertStructure('after third apply (idempotent)')
 }

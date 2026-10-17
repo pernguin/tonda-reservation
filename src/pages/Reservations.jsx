@@ -196,6 +196,7 @@ export default function Reservations() {
   const lookupStatusResetRef = useRef(null)
   const configCacheRef = useRef(new Map())
   const submitLockRef = useRef(false)
+  const searchSeqRef = useRef(0)
 
   useEffect(() => {
     async function fetchExperiences() {
@@ -262,6 +263,8 @@ export default function Reservations() {
   }
 
   async function runSearch(dateArg, guestsArg) {
+    const seq = ++searchSeqRef.current
+    setSearchLoading(false) // a newer search supersedes any in-flight one, including when it returns early below
     const date = dateArg ?? form.reservation_date
     const guestsRaw = guestsArg ?? form.guest_count
     setSelectedSlot(null)
@@ -297,6 +300,7 @@ export default function Reservations() {
         getDateInfo(date, configCacheRef.current),
         fetchAvailability(date, guestCount)
       ])
+      if (seq !== searchSeqRef.current) return
       if (info.closed) {
         setSearchError(info.reason)
         setHasSearched(true)
@@ -316,10 +320,11 @@ export default function Reservations() {
       setAvailableGroups(resultGroups)
       setHasSearched(true)
     } catch {
+      if (seq !== searchSeqRef.current) return
       setSearchError('Something went wrong. Please try again.')
       setHasSearched(true)
     } finally {
-      setSearchLoading(false)
+      if (seq === searchSeqRef.current) setSearchLoading(false)
     }
   }
 

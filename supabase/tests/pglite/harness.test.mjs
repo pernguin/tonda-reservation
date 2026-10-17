@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 
 export default async function ({ q }) {
   const procs = [
-    'public.assign_tables(date,time,integer,integer)',
+    'public.assign_tables(date,time,integer,integer,uuid)',
     'public.create_reservation_atomic(date,time,text,integer,uuid,text,integer,boolean)',
     'public.amend_reservation_atomic(uuid,date,time,integer,text,integer,boolean)',
     'public.get_availability(date,integer)',

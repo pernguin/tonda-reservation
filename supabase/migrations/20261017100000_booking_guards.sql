@@ -609,3 +609,69 @@ begin
 end;
 $$;
 grant execute on function public.get_availability(date, int) to anon, authenticated;
+
+-------------------------------------------------------------------------------
+-- 5. Trigger functions: security definer, fixed search_path, and a failed email call
+--    can no longer abort the booking (same pattern as notify_staff_new_reservation).
+--    The triggers themselves (on_reservation_insert / on_reservation_completed) exist
+--    live and are not defined in any migration; they are left untouched.
+-------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.notify_reservation_insert()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'vault', 'pg_temp'
+AS $function$
+declare
+  v_key text;
+begin
+  begin
+    select decrypted_secret into v_key from vault.decrypted_secrets where name = 'tonda_service_role_key';
+
+    if v_key is null then
+      raise warning 'notify_reservation_insert: tonda_service_role_key missing from vault; alert skipped';
+      return NEW;
+    end if;
+
+    perform net.http_post(
+      url := 'https://qeepslmexektwqhxzwqs.supabase.co/functions/v1/send-confirmation-email',
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || v_key),
+      body := jsonb_build_object('record', row_to_json(NEW))
+    );
+  exception when others then
+    raise warning 'notify_reservation_insert: http_post failed: %', sqlerrm;
+  end;
+  return NEW;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.notify_reservation_completed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'vault', 'pg_temp'
+AS $function$
+declare
+  v_key text;
+begin
+  if NEW.status = 'completed' and (OLD.status is null or OLD.status <> 'completed') then
+    begin
+      select decrypted_secret into v_key from vault.decrypted_secrets where name = 'tonda_service_role_key';
+
+      if v_key is null then
+        raise warning 'notify_reservation_completed: tonda_service_role_key missing from vault; alert skipped';
+        return NEW;
+      end if;
+
+      perform net.http_post(
+        url := 'https://qeepslmexektwqhxzwqs.supabase.co/functions/v1/send-thankyou-email',
+        headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || v_key),
+        body := jsonb_build_object('record', row_to_json(NEW), 'old_record', row_to_json(OLD))
+      );
+    exception when others then
+      raise warning 'notify_reservation_completed: http_post failed: %', sqlerrm;
+    end;
+  end if;
+  return NEW;
+end;
+$function$;

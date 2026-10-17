@@ -57,9 +57,9 @@ export default function SlotRules() {
   const fail = (message, error) => { console.error(message, error); showToast(message) }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => { fetchAll({ initial: true }) }, [])
 
-  async function fetchAll() {
+  async function fetchAll({ initial = false } = {}) {
     const [{ data: slotData, error: slotError }, { data: hoursData, error: hoursError }, { data: datesData, error: datesError }, { data: blackoutData, error: blackoutError }] = await Promise.all([
       supabase.from('slot_rules').select('*'),
       supabase.from('operating_hours').select('*'),
@@ -69,8 +69,10 @@ export default function SlotRules() {
     const loadFailure = slotError || hoursError || datesError || blackoutError
     if (loadFailure) {
       fail('Could not load reservation config.', loadFailure)
-      setLoadError(true)
-      setLoading(false)
+      if (initial) {
+        setLoadError(true)
+        setLoading(false)
+      }
       return
     }
     setBlockedDates(datesData || [])

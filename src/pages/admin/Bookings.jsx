@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
-import { logVisitFromReservation } from '../../lib/customerVisits'
+import { logVisit } from '../../lib/customerVisits'
+import { releasesTables } from '../../lib/bookingsList'
 import { getLocalToday } from '../../lib/tableAvailability'
 import { useUrlStateBatch } from '../../lib/useUrlState'
 import { useToast } from '../../lib/useToast'
@@ -24,6 +25,24 @@ function getTableNumbers(tableIds, tables) {
     .map(id => tables.find(t => t.id === id)?.table_number)
     .filter(Boolean)
     .join(', ')
+}
+
+// Returns null on success, otherwise the first error. Mirrors what the completed path did, with every step checked.
+async function releaseTables(reservation) {
+  const ids = reservation?.table_ids
+  if (!Array.isArray(ids) || ids.length === 0) return null
+  const { error: lockError } = await supabase.from('restaurant_tables')
+    .update({ locked_until: null, locked_by_reservation: null }).in('id', ids)
+  if (lockError) return lockError
+  const { data: grouped, error: groupError } = await supabase.from('restaurant_tables')
+    .select('id, group_id').in('id', ids).not('group_id', 'is', null)
+  if (groupError) return groupError
+  if (!grouped?.length) return null
+  const groupIds = [...new Set(grouped.map(t => t.group_id))]
+  const { error: clearError } = await supabase.from('restaurant_tables').update({ group_id: null }).in('group_id', groupIds)
+  if (clearError) return clearError
+  const { error: deleteError } = await supabase.from('table_groups').delete().in('id', groupIds)
+  return deleteError || null
 }
 
 function ActionButtons({ table, id, busyId, updateStatus }) {
@@ -312,44 +331,20 @@ export default function Bookings() {
     }
 
     const reservation = table === 'reservations' ? reservations.find(r => r.id === id) : null
+    const problems = []
 
-    if (reservation && (status === 'completed' || status === 'no_show')) {
-      await logVisitFromReservation(reservation, status, 'tonda', amountSpent)
-    }
+    if (reservation) {
+      const visitError = await logVisit(supabaseCustomers, reservation, status, 'tonda', amountSpent)
+      if (visitError) problems.push(`guest visit not recorded (${visitError.message})`)
 
-    // When reservation is completed, release locks and unmerge any merged tables
-    if (table === 'reservations' && status === 'completed') {
-      if (reservation && Array.isArray(reservation.table_ids) && reservation.table_ids.length > 0) {
-        // Release locks on all assigned tables
-        await supabase
-          .from('restaurant_tables')
-          .update({ locked_until: null, locked_by_reservation: null })
-          .in('id', reservation.table_ids)
-
-        // Find any table groups that contain these tables and unmerge them
-        const { data: groupedTables } = await supabase
-          .from('restaurant_tables')
-          .select('id, group_id')
-          .in('id', reservation.table_ids)
-          .not('group_id', 'is', null)
-
-        if (groupedTables && groupedTables.length > 0) {
-          const groupIds = [...new Set(groupedTables.map(t => t.group_id))]
-          // Clear group_id from all tables in these groups
-          await supabase
-            .from('restaurant_tables')
-            .update({ group_id: null })
-            .in('group_id', groupIds)
-          // Delete the group records
-          await supabase
-            .from('table_groups')
-            .delete()
-            .in('id', groupIds)
-        }
+      if (releasesTables(status)) {
+        const releaseError = await releaseTables(reservation)
+        if (releaseError) problems.push(`tables not released (${releaseError.message})`)
       }
     }
 
     await fetchAll({ silent: true })
+    if (problems.length) showToast('Status updated, but ' + problems.join(' and '))
     setBusyId(null)
   }
 

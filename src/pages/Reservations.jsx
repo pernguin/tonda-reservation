@@ -4,6 +4,7 @@ import { supabase } from '../supabase'
 import { supabaseCustomers, findOrCreateCustomer, isValidPhone } from '../supabaseCustomers'
 import { collapseSeries, addDays } from '../lib/experienceSeries'
 import { getLocalToday } from '../lib/tableAvailability'
+import { firstRow, prefillName } from '../lib/prefill'
 import { getDayType } from '../lib/dayType'
 import { isSlotBookable } from '../lib/slotCutoff'
 
@@ -331,18 +332,11 @@ export default function Reservations() {
     setForm(prev => ({ ...prev, phone: normalised }))
     if (lookupStatusResetRef.current) clearTimeout(lookupStatusResetRef.current)
     setLookupStatus('loading')
-    const { data } = await supabaseCustomers
-      .from('customers')
-      .select('id, full_name, email, birthdate')
-      .eq('phone', normalised)
-      .maybeSingle()
-    setExistingCustomer(data || null)
-    if (data) {
-      setForm(prev => ({
-        ...prev,
-        full_name: data.full_name || prev.full_name || '',
-        email: data.email || prev.email || ''
-      }))
+    const { data, error } = await supabaseCustomers.rpc('customer_prefill', { p_phone: normalised })
+    const row = error ? null : firstRow(data)
+    if (!error) setExistingCustomer(row ? { has_birthdate: row.has_birthdate } : null)
+    if (row) {
+      setForm(prev => ({ ...prev, full_name: prefillName(prev.full_name, row) }))
       setLookupStatus('found')
     } else {
       setLookupStatus('not_found')
@@ -661,7 +655,7 @@ function CopyButton({ text }) {
                   className={inputClass} />
               </div>
 
-              {existingCustomer && !existingCustomer.birthdate && !birthdaySkipped && (
+              {existingCustomer && !existingCustomer.has_birthdate && !birthdaySkipped && (
                 <div>
                   <p className="text-xs text-[var(--color-text-2)] mb-2">Welcome back! 🎂 Would you like to share your birthday with us?</p>
                   <div className="flex items-center gap-4">

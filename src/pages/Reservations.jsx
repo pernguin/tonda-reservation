@@ -334,7 +334,7 @@ export default function Reservations() {
     setLookupStatus('loading')
     const { data, error } = await supabaseCustomers.rpc('customer_prefill', { p_phone: normalised })
     const row = error ? null : firstRow(data)
-    if (!error) setExistingCustomer(row ? { has_birthdate: row.has_birthdate } : null)
+    setExistingCustomer(error ? undefined : row ? { has_birthdate: row.has_birthdate } : null)
     if (row) {
       setForm(prev => ({ ...prev, full_name: prefillName(prev.full_name, row) }))
       setLookupStatus('found')

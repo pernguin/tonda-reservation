@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
 import { logVisit } from '../../lib/customerVisits'
-import { releasesTables } from '../../lib/bookingsList'
+import {
+  releasesTables, windowStart, olderWindowStart, effectiveWindowStart, chunk, CUSTOMER_ID_CHUNK,
+} from '../../lib/bookingsList'
 import { getLocalToday } from '../../lib/tableAvailability'
 import { useUrlStateBatch } from '../../lib/useUrlState'
 import { useToast } from '../../lib/useToast'
@@ -256,8 +258,11 @@ export default function Bookings() {
   const filterDate = view.date === '' ? getLocalToday() : view.date === 'all' ? '' : view.date
   const filterStatus = view.status
 
+  const [loadFrom, setLoadFrom] = useState(() => windowStart(getLocalToday()))
+  const windowFrom = effectiveWindowStart(loadFrom, filterDate)
+  const windowFromRef = useRef(windowFrom)
+
   useEffect(() => {
-    fetchAll()
     const channel = supabase
       .channel('admin-bookings-list')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
@@ -272,10 +277,16 @@ export default function Bookings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    windowFromRef.current = windowFrom
+    fetchAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowFrom])
+
   async function fetchAll({ silent = false } = {}) {
     if (!silent) setLoading(true)
     const [r, e, o, t] = await Promise.all([
-      supabase.from('reservations').select('*').order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
+      supabase.from('reservations').select('*').gte('reservation_date', windowFromRef.current).order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
       supabase.from('events').select('*').order('event_date', { ascending: true }),
       supabase.from('offsite_bookings').select('*').order('event_date', { ascending: true }),
       supabase.from('restaurant_tables').select('id, table_number')
@@ -299,16 +310,19 @@ export default function Bookings() {
 
     let customersById = {}
     if (customerIds.length > 0) {
-      const { data: customersData, error: customersError } = await supabaseCustomers
-        .from('customers')
-        .select('id, full_name, phone, email, visit_count, no_show_count, birthdate, notes, tags')
-        .in('id', customerIds)
-      if (customersError) {
-        showToast('Could not load bookings: ' + customersError.message)
+      const results = await Promise.all(chunk(customerIds, CUSTOMER_ID_CHUNK).map(ids =>
+        supabaseCustomers
+          .from('customers')
+          .select('id, full_name, phone, email, visit_count, no_show_count, birthdate, notes, tags')
+          .in('id', ids)
+      ))
+      const customersFailed = results.find(res => res.error)
+      if (customersFailed) {
+        showToast('Could not load bookings: ' + customersFailed.error.message)
         setLoading(false)
         return
       }
-      customersById = Object.fromEntries((customersData || []).map(c => [c.id, c]))
+      customersById = Object.fromEntries(results.flatMap(res => res.data || []).map(c => [c.id, c]))
     }
 
     setReservations(reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
@@ -460,6 +474,17 @@ export default function Bookings() {
       <TabBar tabs={tabs} value={tab} onChange={key => setView({ tab: key })} />
 
       {loading ? <Loading /> : renderTab()}
+
+      {tab === 'past' && !loading && (
+        <div className="mt-6 flex flex-col items-start gap-3">
+          <p className="text-xs text-gray-400">Showing reservations from {windowFrom}.</p>
+          <button type="button" onClick={() => setLoadFrom(olderWindowStart(windowFrom))}
+            className="block w-fit px-5 py-2.5 text-xs font-medium tracking-widest uppercase rounded-full border hover:opacity-80 transition-opacity"
+            style={{ borderColor: BRAND, color: BRAND }}>
+            Load older reservations
+          </button>
+        </div>
+      )}
 
       {toastNode}
 

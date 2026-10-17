@@ -4,7 +4,7 @@ export async function signInBoth({ tondaAuth, roundAuth }, credentials) {
   const { error: tondaError } = await tondaAuth.signInWithPassword(credentials)
   if (tondaError) return { tondaOk: false, roundOk: false }
 
-  let roundOk = false
+  let roundOk
   try {
     const { error: roundError } = await roundAuth.signInWithPassword(credentials)
     roundOk = !roundError

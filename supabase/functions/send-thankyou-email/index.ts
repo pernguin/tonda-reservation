@@ -12,6 +12,20 @@ const roundSupabase = createRoundClient();
 const FEEDBACK_BASE_URL = "https://tonda-reservation.vercel.app/feedback";
 
 Deno.serve(async (req) => {
+  let claimed = false;
+  let delivered = false;
+  let reservationId: string | null = null;
+
+  const releaseClaim = async () => {
+    try {
+      const { error } = await supabase
+        .from("reservations").update({ thankyou_sent_at: null }).eq("id", reservationId);
+      if (error) console.error("failed to release thankyou claim", reservationId, error.message);
+    } catch (e) {
+      console.error("failed to release thankyou claim", reservationId, e);
+    }
+  };
+
   try {
     if (req.headers.get("Authorization") !== "Bearer " + SUPABASE_SERVICE_ROLE_KEY) {
       return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
@@ -23,6 +37,8 @@ Deno.serve(async (req) => {
     if (!id) {
       return new Response(JSON.stringify({ error: "No reservation id" }), { status: 400 });
     }
+
+    reservationId = id;
 
     // Never trust the payload body: re-read the booking from the database.
     const { data: reservation, error: reservationError } = await supabase
@@ -54,8 +70,12 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "No email" }), { status: 200 });
     }
 
+    // Build first: a template error must not leave a claim behind.
+    const feedbackUrl = `${FEEDBACK_BASE_URL}?reservation=${reservation.id}&restaurant=tonda`;
+    const { subject, html } = buildThankyouEmail(customer, feedbackUrl);
+
     // Claim before sending so a second call cannot send a duplicate.
-    const { data: claimed, error: claimError } = await supabase
+    const { data: claimedRows, error: claimError } = await supabase
       .from("reservations")
       .update({ thankyou_sent_at: new Date().toISOString() })
       .eq("id", reservation.id)
@@ -65,37 +85,27 @@ Deno.serve(async (req) => {
     if (claimError) {
       return new Response(JSON.stringify({ error: claimError.message }), { status: 500 });
     }
-    if (!claimed || claimed.length === 0) {
+    if (!claimedRows || claimedRows.length === 0) {
       return new Response(JSON.stringify({ skipped: "already sent" }), { status: 200 });
     }
+    claimed = true;
 
-    const releaseClaim = () =>
-      supabase.from("reservations").update({ thankyou_sent_at: null }).eq("id", reservation.id);
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + RESEND_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "Tonda Pizza Romana <reservations.tonda@roundpizzanapoletana.com>",
+        to: [customer.email],
+        subject,
+        html,
+      }),
+    });
+    delivered = res.ok;
 
-    const feedbackUrl = `${FEEDBACK_BASE_URL}?reservation=${reservation.id}&restaurant=tonda`;
-    const { subject, html } = buildThankyouEmail(customer, feedbackUrl);
-
-    let res: Response;
-    try {
-      res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": "Bearer " + RESEND_API_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: "Tonda Pizza Romana <reservations.tonda@roundpizzanapoletana.com>",
-          to: [customer.email],
-          subject,
-          html,
-        }),
-      });
-    } catch (err) {
-      await releaseClaim();
-      return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
-    }
-
-    const data = await res.json();
+    const data = await res.json().catch(() => ({ error: "non-JSON response", status: res.status }));
     if (!res.ok) {
       await releaseClaim();
       return new Response(JSON.stringify(data), { status: 502 });
@@ -103,6 +113,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify(data), { status: 200 });
 
   } catch (err) {
+    if (claimed && !delivered) await releaseClaim();
     return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
   }
 });

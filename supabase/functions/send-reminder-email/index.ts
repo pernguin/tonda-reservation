@@ -48,6 +48,18 @@ Deno.serve(async (req) => {
       const diff = Math.abs((resHour * 60 + resMinute) - (targetHour * 60 + targetMinute));
       if (diff > 60) continue;
 
+      let held = false;
+      let delivered = false;
+      const revert = async () => {
+        try {
+          const { error: revertError } = await supabase
+            .from("reservations").update({ reminder_sent: false }).eq("id", reservation.id);
+          if (revertError) console.error("failed to revert reminder claim", reservation.id, revertError.message);
+        } catch (e) {
+          console.error("failed to revert reminder claim", reservation.id, e);
+        }
+      };
+
       try {
         // Claim first so an overlapping run cannot send a duplicate.
         const { data: claimed, error: claimError } = await supabase
@@ -62,6 +74,7 @@ Deno.serve(async (req) => {
           continue;
         }
         if (!claimed || claimed.length === 0) continue;
+        held = true;
 
         const { data: customer, error: customerError } = await roundSupabase
           .from("customers")
@@ -70,7 +83,7 @@ Deno.serve(async (req) => {
           .maybeSingle();
 
         if (customerError) {
-          await supabase.from("reservations").update({ reminder_sent: false }).eq("id", reservation.id);
+          await revert();
           results.push({ id: reservation.id, error: customerError.message });
           continue;
         }
@@ -94,9 +107,11 @@ Deno.serve(async (req) => {
           }),
         });
 
-        const data = await res.json();
+        delivered = res.ok;
+
+        const data = await res.json().catch(() => ({ status: res.status }));
         if (!res.ok) {
-          await supabase.from("reservations").update({ reminder_sent: false }).eq("id", reservation.id);
+          await revert();
           results.push({ id: reservation.id, error: data });
           continue;
         }
@@ -104,7 +119,7 @@ Deno.serve(async (req) => {
         sent++;
         results.push({ id: reservation.id, resend: data });
       } catch (err) {
-        await supabase.from("reservations").update({ reminder_sent: false }).eq("id", reservation.id);
+        if (held && !delivered) await revert();
         results.push({ id: reservation.id, error: String(err) });
       }
     }

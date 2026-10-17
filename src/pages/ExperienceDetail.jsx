@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
-import { supabaseCustomers } from '../supabaseCustomers'
+import { supabaseCustomers, isValidPhone } from '../supabaseCustomers'
 import { getLocalToday } from '../lib/tableAvailability'
+import { firstRow, prefillName } from '../lib/prefill'
+import { validateRegistration } from '../lib/registrationForm'
 
 const BRAND = 'var(--color-accent)'
 const CREAM = 'var(--color-bg)'
@@ -67,13 +69,10 @@ export default function ExperienceDetail() {
     const normalised = normalisePhone(form.phone)
     if (!normalised) return
     setForm(prev => ({ ...prev, phone: normalised }))
-    const { data } = await supabaseCustomers
-      .from('customers')
-      .select('full_name')
-      .eq('phone', normalised)
-      .maybeSingle()
-    if (data) {
-      setForm(prev => ({ ...prev, name: prev.name || data.full_name || '' }))
+    const { data } = await supabaseCustomers.rpc('customer_prefill', { p_phone: normalised })
+    const row = firstRow(data)
+    if (row) {
+      setForm(prev => ({ ...prev, name: prefillName(prev.name, row) }))
     }
   }
 
@@ -81,12 +80,18 @@ export default function ExperienceDetail() {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    const problem = validateRegistration({ phone: normalisePhone(form.phone), pax: form.pax }, isValidPhone)
+    if (problem) {
+      setError(problem)
+      setLoading(false)
+      return
+    }
     try {
       const { error: insertError } = await supabase.from('experience_registrations').insert([{
         experience_id: current.id,
         name: form.name,
         phone: normalisePhone(form.phone),
-        pax: parseInt(form.pax) || 1,
+        pax: parseInt(form.pax, 10),
         notes: form.notes || null
       }])
       if (insertError) throw insertError

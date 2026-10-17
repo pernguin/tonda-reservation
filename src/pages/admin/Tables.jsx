@@ -150,6 +150,7 @@ export default function Tables() {
   const [deleteTableConfirm, setDeleteTableConfirm] = useState(null)
   const [explodingTableId, setExplodingTableId] = useState(null)
   const [showToast, toastNode] = useToast()
+  const fail = (message, error) => { console.error(message, error); showToast(message) }
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
@@ -157,6 +158,7 @@ export default function Tables() {
   const requestIdRef = useRef(0)
   const latestDataRef = useRef({ tables: [], reservations: [], blocks: [], hold: 120 })
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchAll() }, [selectedDate])
 
   // Live refresh: any change to today's reservations, the tables, or today's blocks refetches the
@@ -248,7 +250,7 @@ export default function Tables() {
   async function fetchAll() {
     const requestId = ++requestIdRef.current
     const dayType = await getDayType(selectedDate)
-    const [{ data: tableData }, { data: resData }, { data: blockData }, { data: slotRuleData }] = await Promise.all([
+    const [{ data: tableData, error: tableError }, { data: resData, error: resError }, { data: blockData, error: blockError }, { data: slotRuleData }] = await Promise.all([
       supabase.from('restaurant_tables').select('*'),
       supabase.from('reservations')
         .select('*')
@@ -260,6 +262,10 @@ export default function Tables() {
         .eq('block_date', selectedDate),
       supabase.from('slot_rules').select('hold_duration_minutes').eq('day_type', dayType).maybeSingle()
     ])
+    if (tableError || resError || blockError) {
+      fail('Could not load the floor plan. Showing the last loaded data.', tableError || resError || blockError)
+      return
+    }
 
     const reservationsData = resData || []
     const customerIds = [...new Set(reservationsData.map(r => r.customer_id).filter(Boolean))]

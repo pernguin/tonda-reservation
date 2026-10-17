@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers } from '../supabaseCustomers'
+import { getLocalToday } from '../lib/tableAvailability'
 
 const BRAND = 'var(--color-accent)'
 const CREAM = 'var(--color-bg)'
@@ -20,11 +21,7 @@ export default function ManageBooking() {
 
   async function fetchBooking() {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('id', id)
-      .single()
+    const { data, error } = await supabase.rpc('get_booking', { p_id: id }).maybeSingle()
     if (error || !data) {
       setError('Booking not found.')
       setLoading(false)
@@ -33,12 +30,8 @@ export default function ManageBooking() {
 
     let customer
     if (data.customer_id) {
-      const { data: customerData } = await supabaseCustomers
-        .from('customers')
-        .select('id, full_name, phone, email')
-        .eq('id', data.customer_id)
-        .single()
-      customer = customerData
+      const { data: fullName } = await supabaseCustomers.rpc('customer_display_name', { p_id: data.customer_id })
+      customer = fullName ? { full_name: fullName } : undefined
     }
 
     setBooking({ ...data, customers: customer })
@@ -90,7 +83,7 @@ export default function ManageBooking() {
     )
   }
 
-  const isPast = booking.reservation_date < new Date().toISOString().split('T')[0]
+  const isPast = booking.reservation_date < getLocalToday()
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
@@ -105,8 +98,6 @@ export default function ManageBooking() {
           <div className="mb-5 pb-5 border-b border-[var(--color-border)]">
             <p className="text-xs tracking-widest uppercase text-[var(--color-text-muted)] mb-3">Guest</p>
             <p className="font-medium text-[var(--color-text)]">{booking.customers?.full_name}</p>
-            <p className="text-sm text-[var(--color-text-muted)]">{booking.customers?.phone}</p>
-            {booking.customers?.email && <p className="text-sm text-[var(--color-text-muted)]">{booking.customers.email}</p>}
           </div>
 
           <div className="mb-5 pb-5 border-b border-[var(--color-border)]">

@@ -515,8 +515,9 @@ export default function Tables() {
     await insertRow()
   }
 
-  // Cross-date, active-status only -- staff need to know about a booking
+  // Today-and-later, active-status only -- staff need to know about a booking
   // next week, not just whatever date happens to be selected right now.
+  // Past bookings are not listed; they don't need unassigning.
   async function openDeleteTableConfirm(table) {
     // table_ids is stored as jsonb, not a native Postgres array -- .contains()
     // generates array-literal syntax that errors against a jsonb column
@@ -529,8 +530,9 @@ export default function Tables() {
       .from('reservations')
       .select('id, reservation_date, reservation_time, guest_count, table_ids, customer_id')
       .in('status', ['confirmed', 'pending', 'seated'])
+      .gte('reservation_date', getLocalToday())
       .order('reservation_date', { ascending: true })
-    if (reservationsError) { console.error('Failed to check affected reservations:', reservationsError); return }
+    if (reservationsError) { fail('Could not check which bookings use this table.', reservationsError); return }
     const affectedRaw = (allActive || []).filter(r =>
       Array.isArray(r.table_ids) && r.table_ids.includes(table.id)
     )
@@ -551,7 +553,7 @@ export default function Tables() {
       .select('id, block_date, reason')
       .eq('table_id', table.id)
       .order('block_date', { ascending: true })
-    if (blocksError) { console.error('Failed to check affected blocks:', blocksError); return }
+    if (blocksError) { fail('Could not check which blocks use this table.', blocksError); return }
     setDeleteTableConfirm({ table, affectedReservations, affectedBlocks: affectedBlocks || [] })
   }
 
@@ -575,7 +577,7 @@ export default function Tables() {
       for (const r of affectedReservations) {
         const newIds = r.table_ids.filter(id => id !== table.id)
         const { error } = await supabase.from('reservations').update({ table_ids: newIds }).eq('id', r.id)
-        if (error) { console.error('Failed to unassign reservation', r.id, error); return }
+        if (error) { fail('Could not unassign a booking from the table, so it was not deleted.', error); return }
       }
       if (table.group_id) {
         // Disbands the merge -- the other member(s) physically still exist
@@ -583,19 +585,19 @@ export default function Tables() {
         const { error: groupError } = await supabase.from('restaurant_tables')
           .update({ group_id: null, locked_until: null, locked_by_reservation: null })
           .eq('group_id', table.group_id)
-        if (groupError) { console.error('Failed to disband group', table.group_id, groupError); return }
+        if (groupError) { fail('Could not disband the merged group, so the table was not deleted.', groupError); return }
         const { error: deleteGroupError } = await supabase.from('table_groups').delete().eq('id', table.group_id)
-        if (deleteGroupError) { console.error('Failed to delete table_groups row', table.group_id, deleteGroupError); return }
+        if (deleteGroupError) { fail('Could not remove the merged group, so the table was not deleted.', deleteGroupError); return }
       } else {
         const { error } = await supabase.from('restaurant_tables')
           .update({ locked_until: null, locked_by_reservation: null })
           .eq('id', table.id)
-        if (error) { console.error('Failed to release lock on', table.id, error); return }
+        if (error) { fail('Could not release the table lock, so the table was not deleted.', error); return }
       }
       const { error: blocksError } = await supabase.from('table_blocks').delete().eq('table_id', table.id)
-      if (blocksError) { console.error('Failed to delete table_blocks for', table.id, blocksError); return }
+      if (blocksError) { fail('Could not clear the table blocks, so the table was not deleted.', blocksError); return }
       const { error: deleteError } = await supabase.from('restaurant_tables').delete().eq('id', table.id)
-      if (deleteError) { console.error('Failed to delete table', table.id, deleteError); return }
+      if (deleteError) { fail('Could not delete the table.', deleteError); return }
       setSelected(null)
     } finally {
       setExplodingTableId(null)
@@ -613,7 +615,7 @@ export default function Tables() {
       reason: blockForm.reason || null,
       source_type: 'manual'
     }])
-    if (error) { console.error('Failed to block table:', error); return }
+    if (error) { fail('Could not block the table.', error); return }
     setBlockFormOpen(false)
     setBlockForm(emptyBlockForm)
     await fetchAll()
@@ -621,7 +623,7 @@ export default function Tables() {
 
   async function unblockTable(blockId) {
     const { error } = await supabase.from('table_blocks').delete().eq('id', blockId)
-    if (error) { console.error('Failed to unblock table:', error); return }
+    if (error) { fail('Could not unblock the table.', error); return }
     await fetchAll()
   }
 

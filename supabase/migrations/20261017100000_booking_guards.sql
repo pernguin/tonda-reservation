@@ -675,3 +675,48 @@ begin
   return NEW;
 end;
 $function$;
+
+-------------------------------------------------------------------------------
+-- 6. Constraints, index, cron housekeeping (each idempotent).
+-------------------------------------------------------------------------------
+-- guest_count > 0: added NOT VALID, then validated; existing bad rows leave it NOT VALID
+-- instead of rolling the whole migration back.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'reservations_guest_count_positive') then
+    alter table public.reservations
+      add constraint reservations_guest_count_positive check (guest_count > 0) not valid;
+  end if;
+  begin
+    alter table public.reservations validate constraint reservations_guest_count_positive;
+  exception when check_violation then
+    raise notice 'reservations_guest_count_positive left NOT VALID: existing rows violate it';
+  end;
+end;
+$$;
+
+-- unique table_number: only when no duplicates exist.
+do $$
+begin
+  if exists (select 1 from public.restaurant_tables group by table_number having count(*) > 1) then
+    raise notice 'restaurant_tables has duplicate table_number values; unique constraint not added';
+  elsif not exists (select 1 from pg_constraint where conname = 'restaurant_tables_table_number_key') then
+    alter table public.restaurant_tables add constraint restaurant_tables_table_number_key unique (table_number);
+  end if;
+end;
+$$;
+
+create index if not exists reservations_date_status_idx on public.reservations (reservation_date, status);
+
+-- Weekly purge of cron run history (Supabase cron runs in UTC: Sunday 03:00 UTC).
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'purge-cron-run-details') then
+    perform cron.unschedule('purge-cron-run-details');
+  end if;
+  perform cron.schedule(
+    'purge-cron-run-details',
+    '0 3 * * 0',
+    $cmd$ delete from cron.job_run_details where end_time < now() - interval '14 days' $cmd$);
+end;
+$$;

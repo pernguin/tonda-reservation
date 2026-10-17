@@ -98,3 +98,17 @@ create table public.reservations (
   reminder_sent boolean default false,
   created_at timestamptz default now()
 );
+
+-- Tables the RLS lockdown (package 10) touches that no migration creates. Columns are only what the tests need.
+create table public.table_groups (id uuid primary key default gen_random_uuid());
+create table public.customers (id uuid primary key default gen_random_uuid(), full_name text);
+create table public.experiences (id uuid primary key default gen_random_uuid(), name text);
+create table public.events (id uuid primary key default gen_random_uuid(), event_type text);
+create table public.offsite_bookings (id uuid primary key default gen_random_uuid(), event_type text);
+create table public.experience_registrations (id uuid primary key default gen_random_uuid(), name text);
+
+create function public.claim_restaurant_tables(p_table_ids uuid[], p_reservation_id uuid, p_from timestamptz, p_until timestamptz)
+returns setof uuid language sql security definer as $$ select null::uuid where false $$;
+
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated;alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated;

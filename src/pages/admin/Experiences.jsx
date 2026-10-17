@@ -6,6 +6,7 @@ import AdminPage from '../../components/admin/AdminPage'
 import StatusBadge from '../../components/admin/StatusBadge'
 import { Loading, EmptyState } from '../../components/admin/States'
 import { BRAND } from '../../lib/adminTheme'
+import { useToast } from '../../lib/useToast'
 
 const inputClass = "w-full border-b border-gray-300 bg-transparent py-3 text-sm text-gray-800 focus:outline-none focus:border-gray-800 transition-colors placeholder-gray-400"
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
@@ -66,18 +67,26 @@ export default function Experiences() {
   const [posterError, setPosterError] = useState(null)
   const [posterFileName, setPosterFileName] = useState(null)
   const posterInputRef = useRef(null)
+  const [showToast, toastNode] = useToast()
+  const fail = (message, error) => { console.error(message, error); showToast(message) }
 
   const MAX_POSTER_SIZE = 5 * 1024 * 1024
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: exps }, { data: regs }, { data: tables }] = await Promise.all([
+    const [{ data: exps, error: expsError }, { data: regs, error: regsError }, { data: tables, error: tablesError }] = await Promise.all([
       supabase.from('experiences').select('*').order('date', { ascending: true }),
       supabase.from('experience_registrations').select('experience_id'),
       supabase.from('restaurant_tables').select('id, table_number')
     ])
+    if (expsError || regsError || tablesError) {
+      fail('Could not load experiences.', expsError || regsError || tablesError)
+      setLoading(false)
+      return
+    }
     const counts = {}
     ;(regs || []).forEach(r => { counts[r.experience_id] = (counts[r.experience_id] || 0) + 1 })
     setExperiences(exps || [])
@@ -112,6 +121,9 @@ export default function Experiences() {
     if (!error) {
       const { data } = supabase.storage.from('event-posters').getPublicUrl(fileName)
       setForm(prev => ({ ...prev, poster_url: data.publicUrl }))
+    } else {
+      setPosterError('Poster upload failed. Try again.')
+      setPosterFileName(null)
     }
     setUploading(false)
   }
@@ -172,11 +184,12 @@ export default function Experiences() {
       fetchAll()
       return
     } else if (editingId) {
-      await supabase.from('experiences').update({
+      const { error } = await supabase.from('experiences').update({
         ...basePayload,
         date: form.date,
         end_date: form.end_date || null
       }).eq('id', editingId)
+      if (error) { fail('Could not save the experience.', error); setSaving(false); return }
     } else if (form.recurring) {
       const { dates, skipped } = generateSeriesDates({
         startDate: form.date,
@@ -196,6 +209,8 @@ export default function Experiences() {
       if (error) {
         console.error('Failed to create series:', error)
         setSeriesNotice(`Failed to create series: ${error.message}`)
+        setSaving(false)
+        return
       } else {
         let notice = `Created ${rows.length} experience${rows.length > 1 ? 's' : ''} in this series.`
         if (skipped.length > 0) {
@@ -204,11 +219,12 @@ export default function Experiences() {
         setSeriesNotice(notice)
       }
     } else {
-      await supabase.from('experiences').insert([{
+      const { error } = await supabase.from('experiences').insert([{
         ...basePayload,
         date: form.date,
         end_date: form.end_date || null
       }])
+      if (error) { fail('Could not save the experience.', error); setSaving(false); return }
     }
 
     setSaving(false)
@@ -218,12 +234,15 @@ export default function Experiences() {
 
   async function handleDelete(id) {
     if (!confirm('Delete this experience? This will also delete its registrations.')) return
-    const { data: regs } = await supabase.from('experience_registrations').select('id').eq('experience_id', id)
+    const { data: regs, error: regsError } = await supabase.from('experience_registrations').select('id').eq('experience_id', id)
+    if (regsError) { fail('Could not delete the experience.', regsError); return }
     const regIds = (regs || []).map(r => r.id)
     if (regIds.length > 0) {
-      await supabase.from('table_blocks').delete().eq('source_type', 'experience').in('source_id', regIds)
+      const { error: blocksError } = await supabase.from('table_blocks').delete().eq('source_type', 'experience').in('source_id', regIds)
+      if (blocksError) { fail('Could not delete the experience.', blocksError); return }
     }
-    await supabase.from('experiences').delete().eq('id', id)
+    const { error } = await supabase.from('experiences').delete().eq('id', id)
+    if (error) { fail('Could not delete the experience.', error); return }
     fetchAll()
   }
 
@@ -251,9 +270,11 @@ export default function Experiences() {
     if (!confirm(message)) return
 
     if (regIds.length > 0) {
-      await supabase.from('table_blocks').delete().eq('source_type', 'experience').in('source_id', regIds)
+      const { error: blocksError } = await supabase.from('table_blocks').delete().eq('source_type', 'experience').in('source_id', regIds)
+      if (blocksError) { fail('Could not delete the experience.', blocksError); return }
     }
-    await supabase.from('experiences').delete().in('id', expIds)
+    const { error } = await supabase.from('experiences').delete().in('id', expIds)
+    if (error) { fail('Could not delete the experience.', error); return }
     setViewingRegs(null)
     fetchAll()
   }
@@ -315,11 +336,12 @@ export default function Experiences() {
     setShowForm(false)
     setViewingRegs(exp)
     setAssigningFor(null)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('experience_registrations')
       .select('*')
       .eq('experience_id', exp.id)
       .order('created_at', { ascending: false })
+    if (error) fail('Could not load registrations.', error)
     setRegistrations(data || [])
     await loadTableDataFor(exp)
   }
@@ -672,6 +694,7 @@ export default function Experiences() {
           )}
         </>
       )}
+      {toastNode}
     </AdminPage>
   )
 }

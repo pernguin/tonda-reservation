@@ -6,6 +6,7 @@ import { getDayType } from '../../lib/dayType'
 import { buildTimeline, formatClock } from '../../lib/tableTimeline'
 import { useUrlState } from '../../lib/useUrlState'
 import { useToast } from '../../lib/useToast'
+import { toLayoutRows } from '../../lib/tableLayoutRows'
 
 const DATE_DEBOUNCE_MS = 300
 
@@ -296,16 +297,8 @@ export default function Tables() {
   }
 
   async function saveTables() {
-    for (const t of tables) {
-      await supabase.from('restaurant_tables').update({
-        table_number: t.table_number,
-        capacity: t.capacity,
-        x_position: t.x_position,
-        y_position: t.y_position,
-        is_bookable: t.is_bookable,
-        rotated: t.rotated || false
-      }).eq('id', t.id)
-    }
+    const { error } = await supabase.from('restaurant_tables').upsert(toLayoutRows(tables), { onConflict: 'id' })
+    if (error) { fail('Could not save the layout. Nothing was changed.', error); return }
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }

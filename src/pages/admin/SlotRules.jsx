@@ -4,6 +4,7 @@ import AdminPage from '../../components/admin/AdminPage'
 import SaveButton from '../../components/admin/SaveButton'
 import { Loading } from '../../components/admin/States'
 import { useSavedFlash } from '../../lib/useSavedFlash'
+import { useToast } from '../../lib/useToast'
 import { BRAND } from '../../lib/adminTheme'
 import { DAYS_BY_TYPE, HIDDEN_DAY_TYPES } from '../../lib/slotRuleDays'
 
@@ -50,17 +51,28 @@ export default function SlotRules() {
   const [newBlackoutEnd, setNewBlackoutEnd] = useState('')
   const [newBlackoutReason, setNewBlackoutReason] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [saved, flashSaved] = useSavedFlash()
+  const [showToast, toastNode] = useToast()
+  const fail = (message, error) => { console.error(message, error); showToast(message) }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
-    const [{ data: slotData }, { data: hoursData }, { data: datesData }, { data: blackoutData }] = await Promise.all([
+    const [{ data: slotData, error: slotError }, { data: hoursData, error: hoursError }, { data: datesData, error: datesError }, { data: blackoutData, error: blackoutError }] = await Promise.all([
       supabase.from('slot_rules').select('*'),
       supabase.from('operating_hours').select('*'),
       supabase.from('blocked_dates').select('*').order('blocked_date', { ascending: true }),
       supabase.from('blackout_dates').select('*').order('block_date', { ascending: true })
     ])
+    const loadFailure = slotError || hoursError || datesError || blackoutError
+    if (loadFailure) {
+      fail('Could not load reservation config.', loadFailure)
+      setLoadError(true)
+      setLoading(false)
+      return
+    }
     setBlockedDates(datesData || [])
     setBlackoutDates(blackoutData || [])
     const merged = DEFAULT_CONFIG.map(def => {
@@ -83,18 +95,25 @@ export default function SlotRules() {
   async function saveAll() {
     for (const c of config) {
       if (HIDDEN_DAY_TYPES.includes(c.day_type)) continue
-      const { data: existingSlot } = await supabase.from('slot_rules').select('id').eq('day_type', c.day_type).maybeSingle()
+      const saveFailed = 'Could not save reservation config. Some days may not have been saved: reload and check.'
+      const { data: existingSlot, error: slotLookupError } = await supabase.from('slot_rules').select('id').eq('day_type', c.day_type).maybeSingle()
+      if (slotLookupError) { fail(saveFailed, slotLookupError); return }
+      let slotWriteError
       if (existingSlot) {
-        await supabase.from('slot_rules').update({ rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [], hold_duration_minutes: c.hold_duration_minutes }).eq('day_type', c.day_type)
+        ({ error: slotWriteError } = await supabase.from('slot_rules').update({ rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [], hold_duration_minutes: c.hold_duration_minutes }).eq('day_type', c.day_type))
       } else {
-        await supabase.from('slot_rules').insert({ day_type: c.day_type, rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [], hold_duration_minutes: c.hold_duration_minutes })
+        ({ error: slotWriteError } = await supabase.from('slot_rules').insert({ day_type: c.day_type, rule_type: c.rule_type, sessions: c.rule_type === 'session' ? c.sessions : [], hold_duration_minutes: c.hold_duration_minutes }))
       }
-      const { data: existingHours } = await supabase.from('operating_hours').select('id').eq('day_type', c.day_type).maybeSingle()
+      if (slotWriteError) { fail(saveFailed, slotWriteError); return }
+      const { data: existingHours, error: hoursLookupError } = await supabase.from('operating_hours').select('id').eq('day_type', c.day_type).maybeSingle()
+      if (hoursLookupError) { fail(saveFailed, hoursLookupError); return }
+      let hoursWriteError
       if (existingHours) {
-        await supabase.from('operating_hours').update({ is_closed: false, closed_days: c.closed_days, sessions: c.sessions }).eq('day_type', c.day_type)
+        ({ error: hoursWriteError } = await supabase.from('operating_hours').update({ is_closed: false, closed_days: c.closed_days, sessions: c.sessions }).eq('day_type', c.day_type))
       } else {
-        await supabase.from('operating_hours').insert({ day_type: c.day_type, is_closed: false, closed_days: c.closed_days, sessions: c.sessions })
+        ({ error: hoursWriteError } = await supabase.from('operating_hours').insert({ day_type: c.day_type, is_closed: false, closed_days: c.closed_days, sessions: c.sessions }))
       }
+      if (hoursWriteError) { fail(saveFailed, hoursWriteError); return }
     }
     flashSaved()
   }
@@ -145,36 +164,40 @@ export default function SlotRules() {
 
   async function addDateControl() {
     if (!newDate) return
-    await supabase.from('blocked_dates').insert({
+    const { error } = await supabase.from('blocked_dates').insert({
       blocked_date: newDate,
       reason: newReason || null,
       max_pax: isClosed ? null : (newMaxPax ? parseInt(newMaxPax) : null),
       is_closed: isClosed,
       date_type: isClosed ? 'closed' : 'custom'
     })
+    if (error) { fail('Could not add the date control.', error); return }
     setNewDate(''); setNewReason(''); setNewMaxPax(''); setIsClosed(false)
     fetchAll()
   }
 
   async function removeDateControl(id) {
-    await supabase.from('blocked_dates').delete().eq('id', id)
+    const { error } = await supabase.from('blocked_dates').delete().eq('id', id)
+    if (error) { fail('Could not remove the date control.', error); return }
     fetchAll()
   }
 
   async function addBlackoutDate() {
     if (!newBlackoutDate) return
-    await supabase.from('blackout_dates').insert({
+    const { error } = await supabase.from('blackout_dates').insert({
       block_date: newBlackoutDate,
       start_time: newBlackoutStart || null,
       end_time: newBlackoutEnd || null,
       reason: newBlackoutReason || null
     })
+    if (error) { fail('Could not add the blackout date.', error); return }
     setNewBlackoutDate(''); setNewBlackoutStart(''); setNewBlackoutEnd(''); setNewBlackoutReason('')
     fetchAll()
   }
 
   async function removeBlackoutDate(id) {
-    await supabase.from('blackout_dates').delete().eq('id', id)
+    const { error } = await supabase.from('blackout_dates').delete().eq('id', id)
+    if (error) { fail('Could not remove the blackout date.', error); return }
     fetchAll()
   }
 
@@ -182,6 +205,13 @@ export default function SlotRules() {
   const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-400"
 
   if (loading) return <AdminPage width="2xl" title="Reservation Config" subtitle="Manage booking rules, sessions and date controls" headerGap="10"><Loading /></AdminPage>
+
+  if (loadError) return (
+    <AdminPage width="2xl" title="Reservation Config" subtitle="Manage booking rules, sessions and date controls" headerGap="10">
+      <p className="text-sm text-gray-500">Could not load reservation config. Reload the page to try again.</p>
+      {toastNode}
+    </AdminPage>
+  )
 
   return (
     <AdminPage width="2xl" title="Reservation Config" subtitle="Manage booking rules, sessions and date controls" headerGap="10"
@@ -401,6 +431,7 @@ export default function SlotRules() {
           </div>
         )}
       </div>
+      {toastNode}
     </AdminPage>
   )
 }

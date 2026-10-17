@@ -48,8 +48,6 @@ export default async function ({ db, q, expectError }) {
   assert.equal(nine.tables_count, 1)
   await db.exec('rollback to savepoint size_case')
 
-  // party_too_large only fires once the big table is taken (existing behaviour, out of scope):
-  // 11 guests with no big table booked is accepted as a pending big-table request.
-  await q(CREATE, ['2030-01-07', '19:00', 'weekday', 7])
+  // over 10 is rejected unconditionally, even with the big table free
   await expectError(CREATE, ['2030-01-07', '19:00', 'weekday', 11], /^party_too_large/)
 }

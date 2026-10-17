@@ -190,6 +190,9 @@ AS $function$
 if p_guest_count is null or p_guest_count < 1 then
 raise exception 'invalid_guest_count: Guest count must be at least 1.';
 end if;
+if p_guest_count > 10 then
+raise exception 'party_too_large: Sorry, we can only take online bookings for up to 10 guests. Please contact us directly.';
+end if;
 v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
 if p_reservation_date < v_today then
 raise exception 'past_date: Sorry, that date has already passed.';

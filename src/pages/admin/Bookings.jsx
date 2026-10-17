@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
 import { logVisit } from '../../lib/customerVisits'
 import {
-  releasesTables, windowStart, olderWindowStart, effectiveWindowStart, chunk, CUSTOMER_ID_CHUNK,
+  releasesTables, partitionBookings, windowStart, olderWindowStart, effectiveWindowStart, chunk, CUSTOMER_ID_CHUNK,
 } from '../../lib/bookingsList'
 import { getLocalToday } from '../../lib/tableAvailability'
 import { useUrlStateBatch } from '../../lib/useUrlState'
@@ -364,14 +364,11 @@ export default function Bookings() {
 
   const today = getLocalToday()
 
-  const upcomingRes     = reservations.filter(r => r.reservation_date >= today && r.status !== 'cancelled')
-  const pastRes         = reservations.filter(r => r.reservation_date < today || r.status === 'cancelled')
-  const upcomingEvents  = events.filter(e => e.event_date >= today && e.status !== 'cancelled')
-  const pastEvents      = events.filter(e => e.event_date < today || e.status === 'cancelled')
-  const upcomingOffsite = offsite.filter(o => o.event_date >= today && o.status !== 'cancelled')
-  const pastOffsite     = offsite.filter(o => o.event_date < today || o.status === 'cancelled')
-  const activeEvents    = events.filter(e => e.status !== 'cancelled')
-  const activeOffsite   = offsite.filter(o => o.status !== 'cancelled')
+  const { upcoming: upcomingRes, past: pastRes } = useMemo(() => partitionBookings(reservations, 'reservation_date', today), [reservations, today])
+  const { upcoming: upcomingEvents, past: pastEvents } = useMemo(() => partitionBookings(events, 'event_date', today), [events, today])
+  const { upcoming: upcomingOffsite, past: pastOffsite } = useMemo(() => partitionBookings(offsite, 'event_date', today), [offsite, today])
+  const activeEvents    = useMemo(() => events.filter(e => e.status !== 'cancelled'), [events])
+  const activeOffsite   = useMemo(() => offsite.filter(o => o.status !== 'cancelled'), [offsite])
 
   function applyFilters(items, dateField) {
     return items.filter(item =>

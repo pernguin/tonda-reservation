@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { Navigate } from 'react-router-dom'
+import { supabaseCustomers } from '../supabaseCustomers'
+import { installRoundSignOutSync } from '../lib/adminSession'
+
+// Module-level: Home's Log out runs where RequireAuth is not mounted, so the sync must not depend on mounting.
+installRoundSignOutSync(supabase.auth, supabaseCustomers.auth)
 
 export default function RequireAuth({ children }) {
   const [session, setSession] = useState(undefined)

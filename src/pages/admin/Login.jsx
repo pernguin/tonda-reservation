@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../../supabase'
+import { supabaseCustomers } from '../../supabaseCustomers'
+import { signInBoth } from '../../lib/adminSession'
 import { useNavigate } from 'react-router-dom'
 import logo from '../../assets/Logo_2.png'
 import { BRAND, CREAM } from '../../lib/adminTheme'
@@ -16,9 +18,12 @@ export default function Login() {
     setLoading(true)
     setError(null)
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { tondaOk } = await signInBoth(
+      { tondaAuth: supabase.auth, roundAuth: supabaseCustomers.auth },
+      { email, password }
+    )
 
-    if (error) {
+    if (!tondaOk) {
       setError('Incorrect email or password.')
       setLoading(false)
     } else {

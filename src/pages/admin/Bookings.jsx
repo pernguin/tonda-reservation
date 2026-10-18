@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../supabase'
 import { supabaseCustomers } from '../../supabaseCustomers'
-import { logVisitFromReservation } from '../../lib/customerVisits'
+import { logVisit } from '../../lib/customerVisits'
+import {
+  releasesTables, partitionBookings, windowStart, olderWindowStart, effectiveWindowStart, chunk, CUSTOMER_ID_CHUNK,
+} from '../../lib/bookingsList'
 import { getLocalToday } from '../../lib/tableAvailability'
 import { useUrlStateBatch } from '../../lib/useUrlState'
 import { useToast } from '../../lib/useToast'
@@ -24,6 +27,30 @@ function getTableNumbers(tableIds, tables) {
     .map(id => tables.find(t => t.id === id)?.table_number)
     .filter(Boolean)
     .join(', ')
+}
+
+// Returns null on success, otherwise the first error. Mirrors what the completed path did, with every step checked.
+async function releaseTables(reservation) {
+  const ids = reservation?.table_ids
+  if (!Array.isArray(ids) || ids.length === 0) return null
+  // Only tables still locked by this booking: stale table_ids may point at tables since given to another booking.
+  const { data: released, error: lockError } = await supabase.from('restaurant_tables')
+    .update({ locked_until: null, locked_by_reservation: null })
+    .in('id', ids).eq('locked_by_reservation', reservation.id).select('id, group_id')
+  if (lockError) return lockError
+  const candidateGroupIds = [...new Set((released || []).map(t => t.group_id).filter(Boolean))]
+  if (candidateGroupIds.length === 0) return null
+  // Keep a group that still has a table locked by another booking.
+  const { data: stillLocked, error: groupError } = await supabase.from('restaurant_tables')
+    .select('group_id').in('group_id', candidateGroupIds).not('locked_by_reservation', 'is', null)
+  if (groupError) return groupError
+  const keep = new Set((stillLocked || []).map(t => t.group_id))
+  const groupIds = candidateGroupIds.filter(g => !keep.has(g))
+  if (groupIds.length === 0) return null
+  const { error: clearError } = await supabase.from('restaurant_tables').update({ group_id: null }).in('group_id', groupIds)
+  if (clearError) return clearError
+  const { error: deleteError } = await supabase.from('table_groups').delete().in('id', groupIds)
+  return deleteError || null
 }
 
 function ActionButtons({ table, id, busyId, updateStatus }) {
@@ -237,8 +264,12 @@ export default function Bookings() {
   const filterDate = view.date === '' ? getLocalToday() : view.date === 'all' ? '' : view.date
   const filterStatus = view.status
 
+  const [loadFrom, setLoadFrom] = useState(() => windowStart(getLocalToday()))
+  const windowFrom = effectiveWindowStart(loadFrom, filterDate)
+  const windowFromRef = useRef(windowFrom)
+  const fetchSeqRef = useRef(0)
+
   useEffect(() => {
-    fetchAll()
     const channel = supabase
       .channel('admin-bookings-list')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
@@ -253,14 +284,22 @@ export default function Bookings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    windowFromRef.current = windowFrom
+    fetchAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowFrom])
+
   async function fetchAll({ silent = false } = {}) {
+    const seq = ++fetchSeqRef.current
     if (!silent) setLoading(true)
     const [r, e, o, t] = await Promise.all([
-      supabase.from('reservations').select('*').order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
+      supabase.from('reservations').select('*').gte('reservation_date', windowFromRef.current).order('reservation_date', { ascending: true }).order('reservation_time', { ascending: true }),
       supabase.from('events').select('*').order('event_date', { ascending: true }),
       supabase.from('offsite_bookings').select('*').order('event_date', { ascending: true }),
       supabase.from('restaurant_tables').select('id, table_number')
     ])
+    if (seq !== fetchSeqRef.current) return
     const failed = [r, e, o, t].find(res => res.error)
     if (failed) {
       showToast('Could not load bookings: ' + failed.error.message)
@@ -280,16 +319,20 @@ export default function Bookings() {
 
     let customersById = {}
     if (customerIds.length > 0) {
-      const { data: customersData, error: customersError } = await supabaseCustomers
-        .from('customers')
-        .select('id, full_name, phone, email, visit_count, no_show_count, birthdate, notes, tags')
-        .in('id', customerIds)
-      if (customersError) {
-        showToast('Could not load bookings: ' + customersError.message)
+      const results = await Promise.all(chunk(customerIds, CUSTOMER_ID_CHUNK).map(ids =>
+        supabaseCustomers
+          .from('customers')
+          .select('id, full_name, phone, email, visit_count, no_show_count, birthdate, notes, tags')
+          .in('id', ids)
+      ))
+      if (seq !== fetchSeqRef.current) return
+      const customersFailed = results.find(res => res.error)
+      if (customersFailed) {
+        showToast('Could not load bookings: ' + customersFailed.error.message)
         setLoading(false)
         return
       }
-      customersById = Object.fromEntries((customersData || []).map(c => [c.id, c]))
+      customersById = Object.fromEntries(results.flatMap(res => res.data || []).map(c => [c.id, c]))
     }
 
     setReservations(reservationsData.map(row => ({ ...row, customers: customersById[row.customer_id] })))
@@ -312,57 +355,30 @@ export default function Bookings() {
     }
 
     const reservation = table === 'reservations' ? reservations.find(r => r.id === id) : null
+    const problems = []
 
-    if (reservation && (status === 'completed' || status === 'no_show')) {
-      await logVisitFromReservation(reservation, status, 'tonda', amountSpent)
-    }
+    if (reservation) {
+      const visitError = await logVisit(supabaseCustomers, reservation, status, 'tonda', amountSpent)
+      if (visitError) problems.push(`guest visit not recorded (${visitError.message})`)
 
-    // When reservation is completed, release locks and unmerge any merged tables
-    if (table === 'reservations' && status === 'completed') {
-      if (reservation && Array.isArray(reservation.table_ids) && reservation.table_ids.length > 0) {
-        // Release locks on all assigned tables
-        await supabase
-          .from('restaurant_tables')
-          .update({ locked_until: null, locked_by_reservation: null })
-          .in('id', reservation.table_ids)
-
-        // Find any table groups that contain these tables and unmerge them
-        const { data: groupedTables } = await supabase
-          .from('restaurant_tables')
-          .select('id, group_id')
-          .in('id', reservation.table_ids)
-          .not('group_id', 'is', null)
-
-        if (groupedTables && groupedTables.length > 0) {
-          const groupIds = [...new Set(groupedTables.map(t => t.group_id))]
-          // Clear group_id from all tables in these groups
-          await supabase
-            .from('restaurant_tables')
-            .update({ group_id: null })
-            .in('group_id', groupIds)
-          // Delete the group records
-          await supabase
-            .from('table_groups')
-            .delete()
-            .in('id', groupIds)
-        }
+      if (releasesTables(status)) {
+        const releaseError = await releaseTables(reservation)
+        if (releaseError) problems.push(`tables not released (${releaseError.message})`)
       }
     }
 
     await fetchAll({ silent: true })
+    if (problems.length) showToast('Status updated, but ' + problems.join(' and '))
     setBusyId(null)
   }
 
   const today = getLocalToday()
 
-  const upcomingRes     = reservations.filter(r => r.reservation_date >= today && r.status !== 'cancelled')
-  const pastRes         = reservations.filter(r => r.reservation_date < today || r.status === 'cancelled')
-  const upcomingEvents  = events.filter(e => e.event_date >= today && e.status !== 'cancelled')
-  const pastEvents      = events.filter(e => e.event_date < today || e.status === 'cancelled')
-  const upcomingOffsite = offsite.filter(o => o.event_date >= today && o.status !== 'cancelled')
-  const pastOffsite     = offsite.filter(o => o.event_date < today || o.status === 'cancelled')
-  const activeEvents    = events.filter(e => e.status !== 'cancelled')
-  const activeOffsite   = offsite.filter(o => o.status !== 'cancelled')
+  const { upcoming: upcomingRes, past: pastRes } = useMemo(() => partitionBookings(reservations, 'reservation_date', today), [reservations, today])
+  const { upcoming: upcomingEvents, past: pastEvents } = useMemo(() => partitionBookings(events, 'event_date', today), [events, today])
+  const { upcoming: upcomingOffsite, past: pastOffsite } = useMemo(() => partitionBookings(offsite, 'event_date', today), [offsite, today])
+  const activeEvents    = useMemo(() => events.filter(e => e.status !== 'cancelled'), [events])
+  const activeOffsite   = useMemo(() => offsite.filter(o => o.status !== 'cancelled'), [offsite])
 
   function applyFilters(items, dateField) {
     return items.filter(item =>
@@ -465,6 +481,17 @@ export default function Bookings() {
       <TabBar tabs={tabs} value={tab} onChange={key => setView({ tab: key })} />
 
       {loading ? <Loading /> : renderTab()}
+
+      {tab === 'past' && !loading && (
+        <div className="mt-6 flex flex-col items-start gap-3">
+          <p className="text-xs text-gray-400">Showing reservations from {windowFrom}.</p>
+          <button type="button" onClick={() => setLoadFrom(olderWindowStart(windowFrom))}
+            className="block w-fit px-5 py-2.5 text-xs font-medium tracking-widest uppercase rounded-full border hover:opacity-80 transition-opacity"
+            style={{ borderColor: BRAND, color: BRAND }}>
+            Load older reservations
+          </button>
+        </div>
+      )}
 
       {toastNode}
 

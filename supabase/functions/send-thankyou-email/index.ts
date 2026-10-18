@@ -1,60 +1,61 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { buildThankyouEmail } from "../_shared/emails.ts";
+import { createRoundClient } from "../_shared/roundClient.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("TONDA_SERVICE_ROLE_KEY")!;
-const ROUND_SUPABASE_URL = Deno.env.get("ROUND_SUPABASE_URL")!;
-const ROUND_SUPABASE_ANON_KEY = Deno.env.get("ROUND_SUPABASE_ANON_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-const roundSupabase = createClient(ROUND_SUPABASE_URL, ROUND_SUPABASE_ANON_KEY);
+const roundSupabase = createRoundClient();
 
 const FEEDBACK_BASE_URL = "https://tonda-reservation.vercel.app/feedback";
 
-function buildEmail(customer: any, feedbackUrl: string): string {
-  const firstName = (customer.full_name ?? "there").split(" ")[0];
-
-  return [
-    "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head>",
-    "<body style='margin:0;padding:0;background:#f5f7fa;font-family:Georgia,serif;'>",
-    "<table width='100%' cellpadding='0' cellspacing='0' style='background:#f5f7fa;padding:40px 0;'>",
-    "<tr><td align='center'>",
-    "<table width='600' cellpadding='0' cellspacing='0' style='background:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;'>",
-    "<tr><td style='background:#1B3A6B;padding:32px 40px;text-align:center;'>",
-    "<h1 style='color:#ffffff;margin:0;font-size:22px;letter-spacing:2px;font-family:Georgia,serif;'>TONDA PIZZA ROMANA</h1>",
-    "</td></tr>",
-    "<tr><td style='padding:40px;'>",
-    "<h2 style='color:#E8420A;font-size:20px;margin:0 0 8px;font-family:Georgia,serif;'>Thank you for dining with us!</h2>",
-    "<p style='color:#333;font-size:15px;margin:0 0 16px;'>Hi " + firstName + ", it was a pleasure having you at Tonda Pizza Romana.</p>",
-    "<p style='color:#555;font-size:14px;margin:0 0 28px;line-height:1.6;'>We hope you enjoyed your meal. If you have a moment, we'd love to hear about your experience — it means the world to a small restaurant like ours.</p>",
-    "<table cellpadding='0' cellspacing='0' style='margin-bottom:32px;'><tr><td style='background:#E8420A;border-radius:4px;'>",
-    "<a href='" + feedbackUrl + "' style='display:inline-block;padding:14px 32px;color:#ffffff;text-decoration:none;font-size:15px;letter-spacing:0.5px;font-family:Georgia,serif;'>Share your feedback</a>",
-    "</td></tr></table>",
-    "<p style='color:#999;font-size:13px;margin:0;line-height:1.6;'>We look forward to welcoming you back soon.</p>",
-    "<p style='color:#999;font-size:13px;margin:8px 0 0;'>— Tonda Pizza Romana</p>",
-    "</td></tr>",
-    "<tr><td style='background:#1B3A6B;padding:20px 40px;text-align:center;'>",
-    "<p style='color:#ffffff;opacity:0.7;font-size:12px;margin:0;'>Tonda Pizza Romana &nbsp;&bull;&nbsp; Taman Desa Business Park, Kuala Lumpur</p>",
-    "</td></tr>",
-    "</table>",
-    "</td></tr></table>",
-    "</body></html>"
-  ].join("");
-}
-
 Deno.serve(async (req) => {
-  try {
-    const payload = await req.json();
-    const reservation = payload.record;
-    const oldRecord = payload.old_record;
+  let claimed = false;
+  let delivered = false;
+  let reservationId: string | null = null;
 
-    if (!reservation || reservation.status !== "completed") {
+  const releaseClaim = async () => {
+    try {
+      const { error } = await supabase
+        .from("reservations").update({ thankyou_sent_at: null }).eq("id", reservationId);
+      if (error) console.error("failed to release thankyou claim", reservationId, error.message);
+    } catch (e) {
+      console.error("failed to release thankyou claim", reservationId, e);
+    }
+  };
+
+  try {
+    if (req.headers.get("Authorization") !== "Bearer " + SUPABASE_SERVICE_ROLE_KEY) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+    }
+
+    const payload = await req.json();
+    const id = payload.record?.id;
+
+    if (!id) {
+      return new Response(JSON.stringify({ error: "No reservation id" }), { status: 400 });
+    }
+
+    reservationId = id;
+
+    // Never trust the payload body: re-read the booking from the database.
+    const { data: reservation, error: reservationError } = await supabase
+      .from("reservations")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (reservationError) {
+      return new Response(JSON.stringify({ error: reservationError.message }), { status: 500 });
+    }
+    if (!reservation) {
+      return new Response(JSON.stringify({ error: "Reservation not found" }), { status: 404 });
+    }
+    if (reservation.status !== "completed") {
       return new Response(JSON.stringify({ skipped: "not completed" }), { status: 200 });
     }
-    if (oldRecord?.status === "completed") {
-      return new Response(JSON.stringify({ skipped: "already was completed" }), { status: 200 });
-    }
-
     if (!reservation.customer_id) {
       return new Response(JSON.stringify({ error: "No customer_id" }), { status: 200 });
     }
@@ -69,8 +70,25 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "No email" }), { status: 200 });
     }
 
+    // Build first: a template error must not leave a claim behind.
     const feedbackUrl = `${FEEDBACK_BASE_URL}?reservation=${reservation.id}&restaurant=tonda`;
-    const html = buildEmail(customer, feedbackUrl);
+    const { subject, html } = buildThankyouEmail(customer, feedbackUrl);
+
+    // Claim before sending so a second call cannot send a duplicate.
+    const { data: claimedRows, error: claimError } = await supabase
+      .from("reservations")
+      .update({ thankyou_sent_at: new Date().toISOString() })
+      .eq("id", reservation.id)
+      .is("thankyou_sent_at", null)
+      .select("id");
+
+    if (claimError) {
+      return new Response(JSON.stringify({ error: claimError.message }), { status: 500 });
+    }
+    if (!claimedRows || claimedRows.length === 0) {
+      return new Response(JSON.stringify({ skipped: "already sent" }), { status: 200 });
+    }
+    claimed = true;
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -81,15 +99,21 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: "Tonda Pizza Romana <reservations.tonda@roundpizzanapoletana.com>",
         to: [customer.email],
-        subject: "Thank you for dining with us at Tonda Pizza Romana",
-        html: html,
+        subject,
+        html,
       }),
     });
+    delivered = res.ok;
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({ error: "non-JSON response", status: res.status }));
+    if (!res.ok) {
+      await releaseClaim();
+      return new Response(JSON.stringify(data), { status: 502 });
+    }
     return new Response(JSON.stringify(data), { status: 200 });
 
   } catch (err) {
+    if (claimed && !delivered) await releaseClaim();
     return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
   }
 });

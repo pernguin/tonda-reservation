@@ -6,167 +6,60 @@ import { collapseSeries, addDays } from '../lib/experienceSeries'
 import { getLocalToday } from '../lib/tableAvailability'
 import { getDayType } from '../lib/dayType'
 import { isSlotBookable } from '../lib/slotCutoff'
+import { pickAvailableGroups, findSlotRow, MAX_ONLINE_PARTY } from '../lib/availabilitySlots'
 
-async function getDateInfo(date) {
+// operating_hours / slot_rules change rarely: cached per day_type in a Map for the page's lifetime.
+// A failed load is dropped from the cache so the next call retries.
+function loadDayConfig(dayType, cache) {
+  if (!cache.has(dayType)) {
+    const load = Promise.all([
+      supabase.from('operating_hours').select('*').eq('day_type', dayType).maybeSingle(),
+      supabase.from('slot_rules').select('*').eq('day_type', dayType).maybeSingle()
+    ]).then(([hoursRes, slotRes]) => {
+      if (hoursRes.error) throw hoursRes.error
+      if (slotRes.error) throw slotRes.error
+      return { hours: hoursRes.data, slotRule: slotRes.data }
+    })
+    load.catch(() => cache.delete(dayType))
+    cache.set(dayType, load)
+  }
+  return cache.get(dayType)
+}
+
+async function getDateInfo(date, configCache) {
   const dateObj = new Date(date)
   const day = dateObj.getDay()
   const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][day]
 
-  const { data: blocked } = await supabase
-    .from('blocked_dates')
-    .select('*')
-    .eq('blocked_date', date)
-    .maybeSingle()
+  const day_type = await getDayType(date)
+
+  const [blockedRes, config] = await Promise.all([
+    supabase
+      .from('blocked_dates')
+      .select('*')
+      .eq('blocked_date', date)
+      .maybeSingle(),
+    loadDayConfig(day_type, configCache)
+  ])
+  if (blockedRes.error) throw blockedRes.error
+
+  const blocked = blockedRes.data
+  const { hours, slotRule } = config
 
   if (blocked?.is_closed) return { closed: true, reason: 'Sorry, reservations are not available on this date.' }
   const max_pax = blocked?.max_pax ?? null
-
-  const day_type = await getDayType(date)
-
-  const { data: hours } = await supabase
-    .from('operating_hours')
-    .select('*')
-    .eq('day_type', day_type)
-    .maybeSingle()
 
   if (hours?.closed_days?.includes(dayName)) {
     return { closed: true, reason: `Sorry, we are closed on ${dayName}s.` }
   }
 
-  const { data: slotRule } = await supabase
-    .from('slot_rules')
-    .select('*')
-    .eq('day_type', day_type)
-    .maybeSingle()
-
   return { closed: false, day_type, dayName, slotRule, operatingHours: hours, max_pax }
 }
 
-function getTablesNeeded(guestCount) {
-  if (guestCount <= 2) return { count: 1, type: 'small' }
-  if (guestCount <= 10) {
-    const n = Math.ceil((guestCount - 2) / 2)
-    return { count: n, type: 'small' }
-  }
-  return { count: 0, type: 'none' }
-}
-
-async function getSmallTableCapacity() {
-  const { data: bookableTables } = await supabase
-    .from('restaurant_tables')
-    .select('table_number, capacity')
-    .eq('is_bookable', true)
-
-  return (bookableTables || [])
-    .filter(t => t.table_number !== 'BT' && (t.capacity || 0) >= 2)
-    .reduce((sum, t) => sum + t.capacity, 0)
-}
-
-async function getBlackoutWindows(date) {
-  const { data } = await supabase
-    .from('blackout_dates')
-    .select('start_time, end_time')
-    .eq('block_date', date)
+async function fetchAvailability(date, guestCount) {
+  const { data, error } = await supabase.rpc('get_availability', { p_date: date, p_guest_count: guestCount })
+  if (error) throw error
   return data || []
-}
-
-// A row with both times null blacks out the whole date. A row with only one
-// bound set treats the missing bound as the day's edge (00:00 / 23:59).
-function isBlackedOut(blackoutWindows, time, durationMinutes) {
-  const [h, m] = time.split(':').map(Number)
-  const startMins = h * 60 + m
-  const endMins = startMins + durationMinutes
-
-  return blackoutWindows.some(w => {
-    if (!w.start_time && !w.end_time) return true
-    const [wsH, wsM] = (w.start_time || '00:00').split(':').map(Number)
-    const [weH, weM] = (w.end_time || '23:59').split(':').map(Number)
-    const windowStart = wsH * 60 + wsM
-    const windowEnd = weH * 60 + weM
-    return startMins < windowEnd && endMins > windowStart
-  })
-}
-
-// Pure: decides availability for one candidate time from already-fetched
-// reservations/capacity/blackouts, so a multi-slot search doesn't re-fetch
-// per slot. Blackout is checked first, before any capacity/table math.
-function computeAvailability(existingReservations, totalSmallCapacity, blackoutWindows, date, time, guestCount, durationMinutes) {
-  if (isBlackedOut(blackoutWindows, time, durationMinutes)) {
-    return { available: false, reason: 'Sorry, reservations are not available at this time.' }
-  }
-
-  const bookingStart = new Date(`${date}T${time}`)
-  const bookingEnd = new Date(bookingStart.getTime() + durationMinutes * 60 * 1000)
-
-  let bookedSmallSeats = 0
-  let bigTableBooked = false
-
-  for (const booking of existingReservations || []) {
-    const existStart = new Date(`${booking.reservation_date}T${booking.reservation_time}`)
-    const existEnd = new Date(existStart.getTime() + durationMinutes * 60 * 1000)
-    const overlaps = bookingStart < existEnd && bookingEnd > existStart
-    if (overlaps) {
-      if (booking.table_type === 'big') bigTableBooked = true
-      else bookedSmallSeats += (booking.guest_count || 0)
-    }
-  }
-
-  const availableSmallSeats = totalSmallCapacity - bookedSmallSeats
-
-  if (guestCount >= 6 && guestCount <= 8 && !bigTableBooked) {
-    return { available: true, type: 'big', count: 1, autoConfirm: true }
-  }
-  if (guestCount > 8 && !bigTableBooked) {
-    return { available: true, type: 'big', count: 1, autoConfirm: false, manualOnly: true }
-  }
-
-  const tableNeeds = getTablesNeeded(guestCount)
-  if (tableNeeds.type === 'none') {
-    return { available: false, reason: 'Party size too large — please contact us directly.' }
-  }
-  if (guestCount > availableSmallSeats) {
-    return { available: false, reason: `Sorry, we don't have enough tables for this time slot. Please choose a different time.` }
-  }
-
-  return { available: true, type: 'small', count: tableNeeds.count, autoConfirm: true }
-}
-
-async function checkAvailability(date, time, guestCount, durationMinutes) {
-  const [{ data: existing }, totalSmallCapacity, blackoutWindows] = await Promise.all([
-    supabase
-      .from('reservations')
-      .select('*')
-      .eq('reservation_date', date)
-      .in('status', ['confirmed', 'pending', 'seated']),
-    getSmallTableCapacity(),
-    getBlackoutWindows(date)
-  ])
-  return computeAvailability(existing || [], totalSmallCapacity, blackoutWindows, date, time, guestCount, durationMinutes)
-}
-
-// Runs computeAvailability across every candidate slot in one pass (single
-// fetch of reservations/capacity/blackouts) and keeps only the slots that are
-// actually bookable, dropping any session group left with none.
-async function searchAvailability(date, guestCount, durationMinutes, slotGroups) {
-  const [{ data: existing }, totalSmallCapacity, blackoutWindows] = await Promise.all([
-    supabase
-      .from('reservations')
-      .select('*')
-      .eq('reservation_date', date)
-      .in('status', ['confirmed', 'pending', 'seated']),
-    getSmallTableCapacity(),
-    getBlackoutWindows(date)
-  ])
-
-  return slotGroups
-    .map(group => ({
-      sessionLabel: group.sessionLabel,
-      slots: group.slots.filter(slot =>
-        isSlotBookable(slot.value, date) &&
-        computeAvailability(existing || [], totalSmallCapacity, blackoutWindows, date, slot.value, guestCount, durationMinutes).available
-      )
-    }))
-    .filter(group => group.slots.length > 0)
 }
 
 function formatTime12(time24) {
@@ -258,6 +151,22 @@ function normalisePhone(raw) {
 const inputClass = "w-full border-b border-[var(--color-border)] bg-transparent py-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition-colors placeholder-[var(--color-text-muted)] disabled:opacity-40 disabled:cursor-not-allowed"
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-[var(--color-text-2)]"
 
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }}
+      className="text-xs tracking-widest uppercase shrink-0 transition-colors"
+      style={{ color: copied ? '#16a34a' : BRAND }}>
+      {copied ? '✓ Copied' : 'Copy'}
+    </button>
+  )
+}
+
 export default function Reservations() {
   const navigate = useNavigate()
   const [form, setForm] = useState({
@@ -285,10 +194,13 @@ export default function Reservations() {
   const [lookupStatus, setLookupStatus] = useState('idle') // 'idle' | 'loading' | 'found' | 'not_found'
   const researchDebounceRef = useRef(null)
   const lookupStatusResetRef = useRef(null)
+  const configCacheRef = useRef(new Map())
+  const submitLockRef = useRef(false)
+  const searchSeqRef = useRef(0)
 
   useEffect(() => {
     async function fetchExperiences() {
-      const today = new Date().toISOString().split('T')[0]
+      const today = getLocalToday()
       const { data } = await supabase
         .from('experiences')
         .select('*')
@@ -351,6 +263,8 @@ export default function Reservations() {
   }
 
   async function runSearch(dateArg, guestsArg) {
+    const seq = ++searchSeqRef.current
+    setSearchLoading(false) // a newer search supersedes any in-flight one, including when it returns early below
     const date = dateArg ?? form.reservation_date
     const guestsRaw = guestsArg ?? form.guest_count
     setSelectedSlot(null)
@@ -368,31 +282,50 @@ export default function Reservations() {
       return
     }
 
-    setSearchLoading(true)
-    const info = await getDateInfo(date)
-    if (info.closed) {
-      setSearchLoading(false)
-      setSearchError(info.reason)
+    const guestCount = parseInt(guestsRaw, 10)
+    if (!(guestCount >= 1)) {
+      setSearchError('Please enter at least 1 guest.')
+      setHasSearched(true)
+      return
+    }
+    if (guestCount > MAX_ONLINE_PARTY) {
+      setSearchError('Party size too large — please contact us directly.')
       setHasSearched(true)
       return
     }
 
-    const guestCount = parseInt(guestsRaw)
-    if (info.max_pax && guestCount > info.max_pax) {
-      setSearchLoading(false)
-      setSearchError(`Sorry, we can only accommodate up to ${info.max_pax} guests on this date.`)
+    try {
+      setSearchLoading(true)
+      const [info, rows] = await Promise.all([
+        getDateInfo(date, configCacheRef.current),
+        fetchAvailability(date, guestCount)
+      ])
+      if (seq !== searchSeqRef.current) return
+      if (info.closed) {
+        setSearchError(info.reason)
+        setHasSearched(true)
+        return
+      }
+
+      if (info.max_pax && guestCount > info.max_pax) {
+        setSearchError(`Sorry, we can only accommodate up to ${info.max_pax} guests on this date.`)
+        setHasSearched(true)
+        return
+      }
+
+      const slotGroups = getTimeSlotGroups(info)
+      const resultGroups = pickAvailableGroups(slotGroups, rows, date, isSlotBookable)
+
+      setSearchDurationMinutes(info.slotRule?.hold_duration_minutes ?? 120)
+      setAvailableGroups(resultGroups)
       setHasSearched(true)
-      return
+    } catch {
+      if (seq !== searchSeqRef.current) return
+      setSearchError('Something went wrong. Please try again.')
+      setHasSearched(true)
+    } finally {
+      if (seq === searchSeqRef.current) setSearchLoading(false)
     }
-
-    const durationMinutes = info.slotRule?.hold_duration_minutes ?? 120
-    const slotGroups = getTimeSlotGroups(info)
-    const resultGroups = await searchAvailability(date, guestCount, durationMinutes, slotGroups)
-
-    setSearchDurationMinutes(durationMinutes)
-    setAvailableGroups(resultGroups)
-    setHasSearched(true)
-    setSearchLoading(false)
   }
 
   function handleGuestsChange(e) {
@@ -422,11 +355,17 @@ export default function Reservations() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitLockRef.current) return
+    submitLockRef.current = true
     setLoading(true)
     setError(null)
 
     try {
-      const info = await getDateInfo(form.reservation_date)
+      if (!isValidPhone(normalisePhone(form.phone))) {
+        setError('Please enter a valid phone number.'); return
+      }
+
+      const info = await getDateInfo(form.reservation_date, configCacheRef.current)
       if (info.closed) { setError(info.reason); setLoading(false); return }
       if (info.max_pax && parseInt(form.guest_count) > info.max_pax) {
         setError(`Sorry, we can only accommodate up to ${info.max_pax} guests on this date.`)
@@ -446,11 +385,10 @@ export default function Reservations() {
         }
       }
 
-      const availability = await checkAvailability(form.reservation_date, form.reservation_time, parseInt(form.guest_count), durationMinutes)
-      if (!availability.available) { setError(availability.reason); setLoading(false); return }
-
-      if (!isValidPhone(normalisePhone(form.phone))) {
-        setError('Please enter a valid phone number.'); setLoading(false); return
+      const rows = await fetchAvailability(form.reservation_date, parseInt(form.guest_count, 10))
+      const slotRow = findSlotRow(rows, form.reservation_time)
+      if (!slotRow || !isSlotBookable(form.reservation_time, form.reservation_date)) {
+        setError("Sorry, we don't have enough tables for this time slot. Please choose a different time."); return
       }
 
       const customerId = await findOrCreateCustomer({
@@ -464,7 +402,7 @@ export default function Reservations() {
         .rpc('create_reservation_atomic', {
           p_reservation_date: form.reservation_date,
           p_reservation_time: form.reservation_time,
-          p_day_type: info.day_type,
+          p_day_type: slotRow.day_type,
           p_guest_count: parseInt(form.guest_count),
           p_customer_id: customerId,
           p_notes: form.notes,
@@ -487,23 +425,9 @@ export default function Reservations() {
       setError('Something went wrong. Please try again.')
       console.error(err)
     } finally {
+      submitLockRef.current = false
       setLoading(false)
     }
-  }
-function CopyButton({ text }) {
-    const [copied, setCopied] = useState(false)
-    return (
-      <button
-        onClick={() => {
-          navigator.clipboard.writeText(text)
-          setCopied(true)
-          setTimeout(() => setCopied(false), 2000)
-        }}
-        className="text-xs tracking-widest uppercase shrink-0 transition-colors"
-        style={{ color: copied ? '#16a34a' : BRAND }}>
-        {copied ? '✓ Copied' : 'Copy'}
-      </button>
-    )
   }
   if (submitted && bookingId) {
     const manageUrl = `${window.location.origin}/booking/${bookingId}`

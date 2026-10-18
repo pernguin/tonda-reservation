@@ -1,38 +1,75 @@
-import { describe, it, expect } from 'vitest'
-import { nextSpend, isLatestVisit } from './customerVisits'
+import { describe, it, expect, vi } from 'vitest'
+import { buildLogVisitArgs, logVisit } from './customerVisits'
 
-describe('nextSpend', () => {
-  it('treats null total_spent as 0', () => {
-    expect(nextSpend({ total_spent: null }, 10, true)).toEqual({ total_spent: 10, last_visit_spent: 10 })
+const reservation = {
+  id: 'res-1',
+  customer_id: 'cust-1',
+  guest_count: 4,
+  reservation_date: '2026-10-17',
+}
+
+describe('buildLogVisitArgs', () => {
+  it('returns null without a customer id', () => {
+    expect(buildLogVisitArgs({ id: 'r', reservation_date: '2026-10-17' }, 'completed', 'tonda', 10)).toBeNull()
+    expect(buildLogVisitArgs(null, 'completed', 'tonda', 10)).toBeNull()
   })
 
-  it('coerces numeric string total_spent from PostgREST', () => {
-    expect(nextSpend({ total_spent: '12.50' }, 5, true)).toEqual({ total_spent: 17.5, last_visit_spent: 5 })
+  it('sends the amount for completed', () => {
+    expect(buildLogVisitArgs(reservation, 'completed', 'tonda', 120).p_amount_spent).toBe(120)
   })
 
-  it('omits last_visit_spent when shouldUpdateLastVisited is false', () => {
-    expect(nextSpend({ total_spent: 20 }, 5, false)).toEqual({ total_spent: 25 })
+  it('sends null for completed with an undefined amount', () => {
+    expect(buildLogVisitArgs(reservation, 'completed', 'tonda', undefined).p_amount_spent).toBeNull()
   })
 
-  it('adds 0 and sets last_visit_spent to 0 when amount is 0', () => {
-    expect(nextSpend({ total_spent: 10 }, 0, true)).toEqual({ total_spent: 10, last_visit_spent: 0 })
+  it('ignores a supplied amount for no_show', () => {
+    expect(buildLogVisitArgs(reservation, 'no_show', 'tonda', 50).p_amount_spent).toBeNull()
+  })
+
+  it.each(['pending', 'confirmed', 'seated', 'cancelled'])('passes %s through with a null amount', status => {
+    const args = buildLogVisitArgs(reservation, status, 'tonda', 50)
+    expect(args.p_status).toBe(status)
+    expect(args.p_amount_spent).toBeNull()
+  })
+
+  it('builds the full argument object', () => {
+    expect(buildLogVisitArgs(reservation, 'completed', 'tonda', 120)).toEqual({
+      p_reservation_id: 'res-1',
+      p_customer_id: 'cust-1',
+      p_restaurant: 'tonda',
+      p_status: 'completed',
+      p_pax: 4,
+      p_visited_at: '2026-10-17',
+      p_amount_spent: 120,
+    })
   })
 })
 
-describe('isLatestVisit', () => {
-  it('is true when the customer has no previous visit', () => {
-    expect(isLatestVisit('2026-09-18', null)).toBe(true)
+describe('logVisit', () => {
+  it('skips the rpc when there is no customer id', async () => {
+    const client = { rpc: vi.fn() }
+    expect(await logVisit(client, { id: 'r' }, 'completed', 'tonda', 10)).toBeNull()
+    expect(client.rpc).not.toHaveBeenCalled()
   })
 
-  it('is true for a later date', () => {
-    expect(isLatestVisit('2026-09-18', '2026-09-01')).toBe(true)
+  it('returns null on success', async () => {
+    const client = { rpc: vi.fn().mockResolvedValue({ error: null }) }
+    expect(await logVisit(client, reservation, 'completed', 'tonda', 10)).toBeNull()
+    expect(client.rpc).toHaveBeenCalledWith('log_visit', expect.objectContaining({ p_status: 'completed' }))
   })
 
-  it('is true for the same day (visited_at has no time)', () => {
-    expect(isLatestVisit('2026-09-18', '2026-09-18')).toBe(true)
+  it('returns the rpc error', async () => {
+    const error = { message: 'x' }
+    const client = { rpc: vi.fn().mockResolvedValue({ error }) }
+    expect(await logVisit(client, reservation, 'completed', 'tonda', 10)).toBe(error)
+    expect(client.rpc).toHaveBeenCalledWith('log_visit', expect.any(Object))
   })
 
-  it('is false for an earlier date', () => {
-    expect(isLatestVisit('2026-09-01', '2026-09-18')).toBe(false)
+  it('returns a thrown error instead of throwing', async () => {
+    const client = { rpc: vi.fn().mockRejectedValue(new Error('boom')) }
+    const result = await logVisit(client, reservation, 'no_show', 'tonda')
+    expect(result).toBeInstanceOf(Error)
+    expect(result.message).toBe('boom')
+    expect(client.rpc).toHaveBeenCalledWith('log_visit', expect.any(Object))
   })
 })

@@ -1,8 +1,11 @@
 import { NavLink } from 'react-router-dom'
 import { BRAND } from '../lib/adminTheme'
+import { useRoundSession } from '../lib/useRoundSession'
 
 export default function AdminNav({ unseenCount = 0, soundOn = false, onToggleSound }) {
+  const hasRoundSession = useRoundSession()
   return (
+    <>
     <nav className="bg-white border-b border-gray-100 py-0">
       <div className="max-w-5xl mx-auto px-4 md:px-6 flex items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {[
@@ -59,5 +62,9 @@ export default function AdminNav({ unseenCount = 0, soundOn = false, onToggleSou
         )}
       </div>
     </nav>
+    {hasRoundSession === false && (
+      <div role="status" className="px-6 py-2 text-xs bg-amber-100 text-amber-700">Customer data unavailable: no Round login for this account</div>
+    )}
+    </>
   )
 }

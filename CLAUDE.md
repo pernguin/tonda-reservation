@@ -14,8 +14,13 @@ Round. Build in Round first, then port here deliberately (see `docs/build/`).
   `docs/superpowers/specs/2026-09-18-ops-tweaks-port-design.md` §3 to restore).
 - `operating_hours.closed_days` is **jsonb** here (Round's is text[]): SQL uses the `?` operator.
 - Dates compare as local `YYYY-MM-DD` strings from `getLocalToday()`.
-- Customer counters on Round's `customers` are maintained by `src/lib/customerVisits.js` with
-  `restaurant: 'tonda'` and must stay consistent with `customer_visits` rows.
+- Customer counters on Round's `customers` are maintained server-side by Round's `log_visit` RPC
+  (authenticated only), which `src/lib/customerVisits.js` calls with `restaurant: 'tonda'` through the
+  admin's Round session. Never write `customers` counters or `customer_visits` from the client.
+- RLS on Tonda's tables (`20261017100300_tonda_rls_lockdown.sql`): signed-in staff get everything; anon
+  only reads hours/slot rules/blocked and blackout dates/experiences/holidays and `confirmation_message_*`
+  settings, and inserts events/off-site/registrations. Any other public access goes through a security
+  definer RPC, never a new anon policy.
 - Admin theme tokens from `src/lib/adminTheme.js` (`BRAND = #E8420A`, `CREAM = #FFFFFF`); no new colours.
 
 ## Build harness
@@ -24,7 +29,7 @@ Round. Build in Round first, then port here deliberately (see `docs/build/`).
 - install: npm install
 - verify: npm run build
 - test: npm test
-- lint: npm run lint — not clean on main (16 problems: 11 errors / 5 warnings as of 2026-10-17); gate on "no new problems"
+- lint: npm run lint — not clean on main (10 problems: 7 errors / 3 warnings as of 2026-10-18); gate on "no new problems"
 - migrations dir: supabase/migrations   (owner runs `supabase db push` against Tonda's project; never from a worktree)
 - invariant greps: toISOString\(\)\.slice\(0, ?10\) ; day_type === 'public_holiday' ; = any\(v_hours\.closed_days\) ; toISOString\(\)\.split
 - dev server: npm run dev -- --port 31NN

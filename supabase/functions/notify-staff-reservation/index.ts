@@ -1,13 +1,13 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { escapeHtml } from "../_shared/escapeHtml.ts";
+import { createRoundClient } from "../_shared/roundClient.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("TONDA_SERVICE_ROLE_KEY")!;
-const ROUND_SUPABASE_URL = Deno.env.get("ROUND_SUPABASE_URL")!;
-const ROUND_SUPABASE_ANON_KEY = Deno.env.get("ROUND_SUPABASE_ANON_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-const roundSupabase = createClient(ROUND_SUPABASE_URL, ROUND_SUPABASE_ANON_KEY);
+const roundSupabase = createRoundClient();
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -23,12 +23,6 @@ function formatWhen(reservationDate: string, reservationTime: string | null): st
 
 function parseRecipients(value: string | null | undefined): string[] {
   return String(value ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-function escapeHtml(s: unknown): string {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function row(label: string, value: string): string {

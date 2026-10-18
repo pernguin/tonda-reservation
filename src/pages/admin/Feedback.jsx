@@ -23,24 +23,25 @@ export default function Feedback() {
   const dateFrom = view.from
   const dateTo = view.to
 
-  useEffect(() => { fetchFeedback() }, [dateFrom, dateTo])
+  useEffect(() => {
+    async function fetchFeedback() {
+      setLoading(true)
+      let query = supabaseCustomers
+        .from('feedback')
+        .select('*, customers(full_name)')
+        .order('created_at', { ascending: false })
 
-  async function fetchFeedback() {
-    setLoading(true)
-    let query = supabaseCustomers
-      .from('feedback')
-      .select('*, customers(full_name)')
-      .order('created_at', { ascending: false })
+      // Tonda's panel never shows Round's feedback.
+      query = query.eq('restaurant', 'tonda')
+      if (dateFrom) query = query.gte('created_at', dateFrom)
+      if (dateTo) query = query.lte('created_at', `${dateTo}T23:59:59`)
 
-    // Tonda's panel never shows Round's feedback.
-    query = query.eq('restaurant', 'tonda')
-    if (dateFrom) query = query.gte('created_at', dateFrom)
-    if (dateTo) query = query.lte('created_at', `${dateTo}T23:59:59`)
-
-    const { data, error } = await query
-    setRows(error ? [] : (data || []))
-    setLoading(false)
-  }
+      const { data, error } = await query
+      setRows(error ? [] : (data || []))
+      setLoading(false)
+    }
+    fetchFeedback()
+  }, [dateFrom, dateTo])
 
   async function markRedeemed(id) {
     setUpdatingId(id)

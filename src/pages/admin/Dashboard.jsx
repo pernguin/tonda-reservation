@@ -8,22 +8,24 @@ import { getLocalToday } from '../../lib/tableAvailability'
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
-    reservations: 0, events: 0, offsite: 0, customers: 0
+    reservations: 0, events: 0, offsite: 0, customers: 0, pastOpen: 0
   })
 
   useEffect(() => {
     async function fetchStats() {
-      const [r, e, o, c] = await Promise.all([
+      const [r, e, o, c, p] = await Promise.all([
         supabase.from('reservations').select('id', { count: 'exact' }).eq('reservation_date', getLocalToday()),
         supabase.from('events').select('id', { count: 'exact' }),
         supabase.from('offsite_bookings').select('id', { count: 'exact' }),
-        supabaseCustomers.from('customers').select('id', { count: 'exact' })
+        supabaseCustomers.from('customers').select('id', { count: 'exact' }),
+        supabase.from('reservations').select('id', { count: 'exact', head: true }).in('status', ['confirmed', 'pending', 'seated']).lt('reservation_date', getLocalToday())
       ])
       setStats({
         reservations: r.count || 0,
         events: e.count || 0,
         offsite: o.count || 0,
-        customers: c.count || 0
+        customers: c.count || 0,
+        pastOpen: p.count || 0
       })
     }
     fetchStats()
@@ -45,6 +47,11 @@ export default function Dashboard() {
 
   return (
     <AdminPage width="3xl" title="Dashboard" subtitle="Overview of all bookings and enquiries" headerGap="10">
+      {stats.pastOpen > 0 && (
+        <Link to="/admin/bookings?tab=past&date=all" className="block border rounded-xl p-4 mb-6 text-sm transition-opacity hover:opacity-80" style={{ borderColor: BRAND, color: BRAND }}>
+          {stats.pastOpen} past booking{stats.pastOpen === 1 ? '' : 's'} still open. Close {stats.pastOpen === 1 ? 'it' : 'them'} out in Manage Bookings.
+        </Link>
+      )}
       <div className="grid grid-cols-2 gap-4 mb-10">
         {stats_cards.map(card => (
           <Link to={card.link} key={card.label}

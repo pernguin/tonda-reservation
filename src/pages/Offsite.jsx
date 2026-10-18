@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../supabase'
-import { findOrCreateCustomer } from '../supabaseCustomers'
+import { findOrCreateCustomer, isValidPhone, normalisePhone } from '../supabaseCustomers'
+import { getLocalToday } from '../lib/tableAvailability'
 
 const BRAND = 'var(--color-accent)'
 const CREAM = 'var(--color-bg)'
@@ -44,6 +45,7 @@ export default function Offsite() {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    if (!isValidPhone(normalisePhone(form.phone))) { setError('Please enter a valid phone number.'); setLoading(false); return }
 
     try {
       const customerId = await findOrCreateCustomer({
@@ -182,7 +184,7 @@ export default function Offsite() {
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <label className={labelClass}>Preferred Date *</label>
-                  <input name="event_date" type="date" value={form.event_date}
+                  <input name="event_date" type="date" min={getLocalToday()} value={form.event_date}
                     onChange={handleChange} required className={inputClass} />
                 </div>
                 <div>

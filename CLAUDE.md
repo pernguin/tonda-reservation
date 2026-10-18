@@ -24,9 +24,9 @@ Round. Build in Round first, then port here deliberately (see `docs/build/`).
 - install: npm install
 - verify: npm run build
 - test: npm test
-- lint: npm run lint — not clean on main (14 problems: 10 errors / 4 warnings as of 2026-09-18); gate on "no new problems"
+- lint: npm run lint — not clean on main (16 problems: 11 errors / 5 warnings as of 2026-10-17); gate on "no new problems"
 - migrations dir: supabase/migrations   (owner runs `supabase db push` against Tonda's project; never from a worktree)
-- invariant greps: toISOString\(\)\.slice\(0, ?10\) ; day_type === 'public_holiday' ; = any\(v_hours\.closed_days\)
+- invariant greps: toISOString\(\)\.slice\(0, ?10\) ; day_type === 'public_holiday' ; = any\(v_hours\.closed_days\) ; toISOString\(\)\.split
 - dev server: npm run dev -- --port 31NN
 - worktree Bash quirk: inside a worktree the Bash tool refuses `&&`, `$(...)`, `for`, `cd`, `git -C`; single plain commands. Stage by path, never `git add -A`.
 

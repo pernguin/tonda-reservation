@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { useNavigate } from 'react-router-dom'
-import logoBg from '../assets/Logo_2.png'
-import hero from '../assets/reservations-hero.jpg'
+import logoBg from '../assets/Logo_2.webp'
+import hero from '../assets/reservations-hero.webp'
 
 export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
@@ -58,7 +58,7 @@ export default function Home() {
 
         {/* Main content */}
         <div className="flex flex-col justify-center flex-1 px-10 md:px-16 pb-8">
-          <img src={logoBg} alt="Tonda Pizza Romana"
+          <img src={logoBg} alt="Tonda Pizza Romana" width={320} height={143} decoding="async"
             className="w-40 mb-6 self-start" />
 
           <p className="text-xs tracking-widest uppercase mb-3" style={{ color: 'var(--color-accent)' }}>
@@ -103,6 +103,10 @@ export default function Home() {
       <div className="hidden md:block md:w-1/2 relative overflow-hidden">
         <img
           src={hero}
+          width={1400}
+          height={1400}
+          fetchPriority="high"
+          decoding="async"
           alt="Guests dining at Tonda in the evening"
           className="absolute inset-0 w-full h-full object-cover"
         />

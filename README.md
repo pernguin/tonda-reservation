@@ -1,19 +1,49 @@
-# React + Vite
+# tonda-reservation
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Public booking site for Tonda Pizza Romana (Taman Desa, Kuala Lumpur): table reservations, event and
+off-site enquiries, experiences, booking management and feedback pages. Staff use the admin area under `/admin`.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+React 19, Vite, Tailwind v4, Supabase, Vercel.
 
-## React Compiler
+## Two Supabase projects
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Tonda's own project holds reservations, tables, slot rules, experiences and settings.
+- Round's project holds the shared `customers`, `customer_visits` and `feedback` tables. The app reaches it through
+  `src/supabaseCustomers.js`. See `CLAUDE.md` for the details and the architecture invariants.
 
-## Expanding the ESLint configuration
+## Run locally
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. `npm install`
+2. Create `.env.local` with `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ROUND_SUPABASE_URL` and
+   `VITE_ROUND_SUPABASE_ANON_KEY`.
+3. `npm run dev`
+
+## Scripts
+
+- `npm run dev` starts the Vite dev server.
+- `npm run build` builds for production into `dist/`.
+- `npm run preview` serves the production build locally.
+- `npm run lint` runs ESLint.
+- `npm test` runs the Vitest suite.
+
+## Routes
+
+Public: `/`, `/reservations`, `/events`, `/offsite`, `/experiences/:id`, `/booking/:id`, `/feedback`.
+
+Admin: `/admin/login`, `/admin`, `/admin/tables`, `/admin/bookings`, `/admin/slot-rules`, `/admin/customers`,
+`/admin/feedback`, `/admin/settings`, `/admin/experiences`.
+
+## Database and functions
+
+Migrations live in `supabase/migrations` and are applied by the owner with `supabase db push`. Edge functions live in
+`supabase/functions`: `send-confirmation-email`, `send-thankyou-email`, `send-reminder-email` and
+`notify-staff-reservation`.
+
+## Build packages
+
+Work is planned and tracked as one brief per package in `docs/build/`.
 
 ## Re-seeding `public_holidays`
 

@@ -2,44 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { supabaseCustomers as roundSupabase } from '../supabaseCustomers'
-import { voucherExpiry } from '../lib/voucher'
-
-const ROUND_SUPABASE_URL = import.meta.env.VITE_ROUND_SUPABASE_URL
-const ROUND_SUPABASE_ANON_KEY = import.meta.env.VITE_ROUND_SUPABASE_ANON_KEY
-
-const PIZZA_WORDS = ['MARGHERITA', 'DIAVOLA', 'QUATTRO', 'BUFALA', 'NAPOLI', 'FORNO', 'ROMANA', 'TONDA', 'SFORNO', 'IMPASTO', 'CORNICIONE', 'BISCOTTO', 'CAPUTO', 'INFERNO', 'SALAMI', 'ANCHOVY', 'BURRATA', 'NDUJA', 'RICOTTA', 'BASILIO']
-
-function generateVoucherCode() {
-  const word = PIZZA_WORDS[Math.floor(Math.random() * PIZZA_WORDS.length)]
-  const num = String(Math.floor(Math.random() * 100)).padStart(2, '0')
-  return `${word}-${num}`
-}
-
-// Raw REST POST instead of the supabase-js client, which appends a
-// ?columns= query param to insert requests that was triggering RLS 42501s.
-// Always targets Round's Supabase, since the shared `feedback` table only
-// exists there (Tonda's own project only holds its own reservations).
-async function insertFeedback(payload) {
-  const res = await fetch(`${ROUND_SUPABASE_URL}/rest/v1/feedback`, {
-    method: 'POST',
-    headers: {
-      apikey: ROUND_SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${ROUND_SUPABASE_ANON_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-    },
-    body: JSON.stringify(payload),
-  })
-
-  const body = await res.json().catch(() => null)
-
-  if (!res.ok) {
-    const error = Array.isArray(body) ? body[0] : body
-    return { data: null, error: error || { message: `HTTP ${res.status}` } }
-  }
-
-  return { data: Array.isArray(body) ? body[0] : body, error: null }
-}
+import { isEligibleReservation, viewForFeedbackState, parseSubmitResult } from '../lib/feedbackFlow'
 
 const BRANDS = {
   round: {
@@ -78,7 +41,6 @@ export default function Feedback() {
   const [loading, setLoading] = useState(true)
   const [invalid, setInvalid] = useState(false)
   const [alreadySubmitted, setAlreadySubmitted] = useState(false)
-  const [isRepeatFeedback, setIsRepeatFeedback] = useState(false)
   const [customerId, setCustomerId] = useState(null)
 
   const [step, setStep] = useState('nps')
@@ -92,7 +54,7 @@ export default function Feedback() {
   useEffect(() => { init() }, [])
 
   async function init() {
-    if (!reservationId || !brand) {
+    if (!reservationId || !brand || restaurant !== 'tonda') {
       setInvalid(true)
       setLoading(false)
       return
@@ -100,38 +62,34 @@ export default function Feedback() {
 
     // Reservations live in Tonda's own Supabase project.
     const { data: reservation, error: resErr } = await supabase
-      .from('reservations')
-      .select('id, customer_id, status')
-      .eq('id', reservationId)
+      .rpc('feedback_reservation', { p_id: reservationId })
       .maybeSingle()
 
-    if (resErr || !reservation || reservation.status !== 'completed') {
+    if (resErr || !isEligibleReservation(reservation)) {
       setInvalid(true)
       setLoading(false)
       return
     }
 
     // feedback is a shared table that only exists on Round's Supabase.
-    const { data: ownFeedback } = await roundSupabase
-      .from('feedback')
-      .select('id')
-      .eq('reservation_id', reservationId)
-      .limit(1)
+    const { data: state, error: stateErr } = await roundSupabase.rpc('feedback_state', {
+      p_reservation_id: reservationId,
+      p_customer_id: reservation.customer_id,
+      p_restaurant: restaurant,
+    })
+    const view = stateErr ? 'invalid' : viewForFeedbackState(state)
 
-    if (ownFeedback && ownFeedback.length > 0) {
+    if (view === 'invalid') {
+      setInvalid(true)
+      setLoading(false)
+      return
+    }
+    if (view === 'submitted') {
       setAlreadySubmitted(true)
       setLoading(false)
       return
     }
 
-    const { data: pastFeedback } = await roundSupabase
-      .from('feedback')
-      .select('id')
-      .eq('customer_id', reservation.customer_id)
-      .eq('restaurant', restaurant)
-      .limit(1)
-
-    setIsRepeatFeedback(pastFeedback && pastFeedback.length > 0)
     setCustomerId(reservation.customer_id)
     setLoading(false)
   }
@@ -144,53 +102,36 @@ export default function Feedback() {
     setSubmitting(true)
     setSubmitError(null)
 
-    let voucherCode = null
-    let voucherExpiresAt = null
-    if (!isRepeatFeedback) {
-      voucherCode = generateVoucherCode()
-      voucherExpiresAt = voucherExpiry()
-    }
-
-    const basePayload = {
-      reservation_id: reservationId,
-      customer_id: customerId,
-      restaurant,
-      nps_score: npsScore,
-      tags: selectedTags,
-      comment: comment.trim() || null,
-      voucher_expires_at: voucherExpiresAt,
-    }
-
-    let { data, error } = await insertFeedback({ ...basePayload, voucher_code: voucherCode })
-
-    if (error && error.code === '23505' && voucherCode) {
-      voucherCode = generateVoucherCode()
-      ;({ data, error } = await insertFeedback({ ...basePayload, voucher_code: voucherCode }))
-    }
+    const { data, error } = await roundSupabase.rpc('submit_feedback', {
+      p_reservation_id: reservationId,
+      p_customer_id: customerId,
+      p_restaurant: restaurant,
+      p_nps_score: npsScore,
+      p_tags: selectedTags,
+      p_comment: comment.trim() || null,
+    })
 
     if (error) {
-      console.error('feedback insert failed:', error.code, error.message, error.details, error.hint)
-      setSubmitError('Something went wrong. Please try again.')
+      console.error('feedback submit failed:', error.code, error.message, error.details, error.hint)
+      if (error.code === '23505') {
+        setAlreadySubmitted(true)
+      } else if (String(error.message).includes('invalid_feedback')) {
+        setInvalid(true)
+      } else {
+        setSubmitError('Something went wrong. Please try again.')
+      }
       setSubmitting(false)
       return
     }
 
-    if (voucherCode) {
-      try {
-        // send-voucher-email is only deployed on Round's Supabase project.
-        await roundSupabase.functions.invoke('send-voucher-email', {
-          body: {
-            reservation_id: reservationId,
-            customer_id: customerId,
-            restaurant,
-            voucher_code: voucherCode,
-            voucher_expires_at: voucherExpiresAt,
-          },
-        })
-      } catch (err) {
-        console.error(err)
-      }
-      setVoucher({ code: voucherCode, expiresAt: voucherExpiresAt })
+    const v = parseSubmitResult(data)
+    if (v) {
+      // send-voucher-email is only deployed on Round's Supabase project.
+      const { error: emailError } = await roundSupabase.functions.invoke('send-voucher-email', {
+        body: { reservation_id: reservationId },
+      })
+      if (emailError) console.error('send-voucher-email failed:', emailError)
+      setVoucher(v)
     }
 
     setSubmitting(false)

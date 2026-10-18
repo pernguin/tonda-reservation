@@ -6,6 +6,7 @@ import { getDayType } from '../../lib/dayType'
 import { buildTimeline, formatClock } from '../../lib/tableTimeline'
 import { useUrlState } from '../../lib/useUrlState'
 import { useToast } from '../../lib/useToast'
+import { toLayoutRows } from '../../lib/tableLayoutRows'
 
 const DATE_DEBOUNCE_MS = 300
 
@@ -150,6 +151,7 @@ export default function Tables() {
   const [deleteTableConfirm, setDeleteTableConfirm] = useState(null)
   const [explodingTableId, setExplodingTableId] = useState(null)
   const [showToast, toastNode] = useToast()
+  const fail = (message, error) => { console.error(message, error); showToast(message) }
   const svgRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const dragMoved = useRef(false)
@@ -157,6 +159,7 @@ export default function Tables() {
   const requestIdRef = useRef(0)
   const latestDataRef = useRef({ tables: [], reservations: [], blocks: [], hold: 120 })
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchAll() }, [selectedDate])
 
   // Live refresh: any change to today's reservations, the tables, or today's blocks refetches the
@@ -248,7 +251,7 @@ export default function Tables() {
   async function fetchAll() {
     const requestId = ++requestIdRef.current
     const dayType = await getDayType(selectedDate)
-    const [{ data: tableData }, { data: resData }, { data: blockData }, { data: slotRuleData }] = await Promise.all([
+    const [{ data: tableData, error: tableError }, { data: resData, error: resError }, { data: blockData, error: blockError }, { data: slotRuleData }] = await Promise.all([
       supabase.from('restaurant_tables').select('*'),
       supabase.from('reservations')
         .select('*')
@@ -260,6 +263,10 @@ export default function Tables() {
         .eq('block_date', selectedDate),
       supabase.from('slot_rules').select('hold_duration_minutes').eq('day_type', dayType).maybeSingle()
     ])
+    if (tableError || resError || blockError) {
+      fail('Could not load the floor plan. Showing the last loaded data.', tableError || resError || blockError)
+      return
+    }
 
     const reservationsData = resData || []
     const customerIds = [...new Set(reservationsData.map(r => r.customer_id).filter(Boolean))]
@@ -290,16 +297,8 @@ export default function Tables() {
   }
 
   async function saveTables() {
-    for (const t of tables) {
-      await supabase.from('restaurant_tables').update({
-        table_number: t.table_number,
-        capacity: t.capacity,
-        x_position: t.x_position,
-        y_position: t.y_position,
-        is_bookable: t.is_bookable,
-        rotated: t.rotated || false
-      }).eq('id', t.id)
-    }
+    const { error } = await supabase.from('restaurant_tables').upsert(toLayoutRows(tables), { onConflict: 'id' })
+    if (error) { fail('Could not save the layout. Nothing was changed.', error); return }
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -419,7 +418,8 @@ export default function Tables() {
       showToast('This table was just claimed by another reservation — pick a different one or refresh.')
       return
     }
-    await supabase.from('reservations').update({ table_ids: newIds, needs_manual_assignment: false }).eq('id', reservationId)
+    const { error: assignError } = await supabase.from('reservations').update({ table_ids: newIds, needs_manual_assignment: false }).eq('id', reservationId)
+    if (assignError) { fail('Assigned the table lock but could not save the assignment. Refresh and check the floor plan.', assignError); return }
     await fetchAll()
     setSelected(null)
     setAssignTarget(null)
@@ -429,10 +429,12 @@ export default function Tables() {
   async function unassignTable(tableId, reservationId) {
     const reservation = reservations.find(r => r.id === reservationId)
     const newIds = (Array.isArray(reservation.table_ids) ? reservation.table_ids : []).filter(id => id !== tableId)
-    await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
-    await supabase.from('restaurant_tables')
+    const { error: reservationError } = await supabase.from('reservations').update({ table_ids: newIds }).eq('id', reservationId)
+    if (reservationError) { fail('Could not unassign the table', reservationError); return }
+    const { error: lockError } = await supabase.from('restaurant_tables')
       .update({ locked_until: null, locked_by_reservation: null })
       .eq('id', tableId)
+    if (lockError) { fail('Unassigned the table but could not clear its lock. Refresh and check the floor plan.', lockError); return }
     await fetchAll()
   }
 
@@ -445,11 +447,12 @@ export default function Tables() {
       .insert({ table_ids: multiSelected, combined_capacity: combinedCapacity })
       .select()
       .single()
-    if (error) { console.error(error); return }
-    await supabase
+    if (error) { fail('Could not merge the tables', error); return }
+    const { error: groupError } = await supabase
       .from('restaurant_tables')
       .update({ group_id: group.id })
       .in('id', multiSelected)
+    if (groupError) { fail('Could not merge the tables', groupError); return }
     setMultiSelected([])
     setMultiSelectMode(false)
     await fetchAll()
@@ -465,12 +468,15 @@ export default function Tables() {
     )
     for (const r of affectedReservations) {
       const newTableIds = r.table_ids.filter(tid => !groupTableIds.includes(tid))
-      await supabase.from('reservations').update({ table_ids: newTableIds }).eq('id', r.id)
+      const { error } = await supabase.from('reservations').update({ table_ids: newTableIds }).eq('id', r.id)
+      if (error) { fail('Could not unmerge the tables', error); return }
     }
-    await supabase.from('restaurant_tables')
+    const { error: tablesError } = await supabase.from('restaurant_tables')
       .update({ group_id: null, locked_until: null, locked_by_reservation: null })
       .eq('group_id', groupId)
-    await supabase.from('table_groups').delete().eq('id', groupId)
+    if (tablesError) { fail('Could not unmerge the tables', tablesError); return }
+    const { error: groupError } = await supabase.from('table_groups').delete().eq('id', groupId)
+    if (groupError) { fail('Could not unmerge the tables', groupError); return }
     await fetchAll()
   }
 
@@ -480,7 +486,7 @@ export default function Tables() {
     const capacity = parseInt(newTableForm.capacity) || 1
 
     const insertRow = async () => {
-      await supabase.from('restaurant_tables').insert({
+      const { error } = await supabase.from('restaurant_tables').insert({
         table_number: name,
         capacity,
         x_position: 250,
@@ -489,6 +495,7 @@ export default function Tables() {
         rotated: false,
         is_temporary: true
       })
+      if (error) { fail('Could not create the table', error); return }
       setNewTableFormOpen(false)
       setNewTableForm({ table_number: '', capacity: '2' })
       await fetchAll()
@@ -508,8 +515,9 @@ export default function Tables() {
     await insertRow()
   }
 
-  // Cross-date, active-status only -- staff need to know about a booking
+  // Today-and-later, active-status only -- staff need to know about a booking
   // next week, not just whatever date happens to be selected right now.
+  // Past bookings are not listed; they don't need unassigning.
   async function openDeleteTableConfirm(table) {
     // table_ids is stored as jsonb, not a native Postgres array -- .contains()
     // generates array-literal syntax that errors against a jsonb column
@@ -522,8 +530,9 @@ export default function Tables() {
       .from('reservations')
       .select('id, reservation_date, reservation_time, guest_count, table_ids, customer_id')
       .in('status', ['confirmed', 'pending', 'seated'])
+      .gte('reservation_date', getLocalToday())
       .order('reservation_date', { ascending: true })
-    if (reservationsError) { console.error('Failed to check affected reservations:', reservationsError); return }
+    if (reservationsError) { fail('Could not check which bookings use this table.', reservationsError); return }
     const affectedRaw = (allActive || []).filter(r =>
       Array.isArray(r.table_ids) && r.table_ids.includes(table.id)
     )
@@ -544,7 +553,7 @@ export default function Tables() {
       .select('id, block_date, reason')
       .eq('table_id', table.id)
       .order('block_date', { ascending: true })
-    if (blocksError) { console.error('Failed to check affected blocks:', blocksError); return }
+    if (blocksError) { fail('Could not check which blocks use this table.', blocksError); return }
     setDeleteTableConfirm({ table, affectedReservations, affectedBlocks: affectedBlocks || [] })
   }
 
@@ -568,7 +577,7 @@ export default function Tables() {
       for (const r of affectedReservations) {
         const newIds = r.table_ids.filter(id => id !== table.id)
         const { error } = await supabase.from('reservations').update({ table_ids: newIds }).eq('id', r.id)
-        if (error) { console.error('Failed to unassign reservation', r.id, error); return }
+        if (error) { fail('Could not unassign a booking from the table, so it was not deleted.', error); return }
       }
       if (table.group_id) {
         // Disbands the merge -- the other member(s) physically still exist
@@ -576,19 +585,19 @@ export default function Tables() {
         const { error: groupError } = await supabase.from('restaurant_tables')
           .update({ group_id: null, locked_until: null, locked_by_reservation: null })
           .eq('group_id', table.group_id)
-        if (groupError) { console.error('Failed to disband group', table.group_id, groupError); return }
+        if (groupError) { fail('Could not disband the merged group, so the table was not deleted.', groupError); return }
         const { error: deleteGroupError } = await supabase.from('table_groups').delete().eq('id', table.group_id)
-        if (deleteGroupError) { console.error('Failed to delete table_groups row', table.group_id, deleteGroupError); return }
+        if (deleteGroupError) { fail('Could not remove the merged group, so the table was not deleted.', deleteGroupError); return }
       } else {
         const { error } = await supabase.from('restaurant_tables')
           .update({ locked_until: null, locked_by_reservation: null })
           .eq('id', table.id)
-        if (error) { console.error('Failed to release lock on', table.id, error); return }
+        if (error) { fail('Could not release the table lock, so the table was not deleted.', error); return }
       }
       const { error: blocksError } = await supabase.from('table_blocks').delete().eq('table_id', table.id)
-      if (blocksError) { console.error('Failed to delete table_blocks for', table.id, blocksError); return }
+      if (blocksError) { fail('Could not clear the table blocks, so the table was not deleted.', blocksError); return }
       const { error: deleteError } = await supabase.from('restaurant_tables').delete().eq('id', table.id)
-      if (deleteError) { console.error('Failed to delete table', table.id, deleteError); return }
+      if (deleteError) { fail('Could not delete the table.', deleteError); return }
       setSelected(null)
     } finally {
       setExplodingTableId(null)
@@ -606,7 +615,7 @@ export default function Tables() {
       reason: blockForm.reason || null,
       source_type: 'manual'
     }])
-    if (error) { console.error('Failed to block table:', error); return }
+    if (error) { fail('Could not block the table.', error); return }
     setBlockFormOpen(false)
     setBlockForm(emptyBlockForm)
     await fetchAll()
@@ -614,7 +623,7 @@ export default function Tables() {
 
   async function unblockTable(blockId) {
     const { error } = await supabase.from('table_blocks').delete().eq('id', blockId)
-    if (error) { console.error('Failed to unblock table:', error); return }
+    if (error) { fail('Could not unblock the table.', error); return }
     await fetchAll()
   }
 
@@ -1290,9 +1299,10 @@ export default function Tables() {
                             className="text-red-500 text-xs hover:text-red-700">Unassign</button>
                           {selectedTable.locked_until && new Date(selectedTable.locked_until) > new Date() && (
                             <button onClick={async () => {
-                              await supabase.from('restaurant_tables')
+                              const { error } = await supabase.from('restaurant_tables')
                                 .update({ locked_until: null, locked_by_reservation: null })
                                 .eq('id', selectedTable.id)
+                              if (error) { fail('Could not release the lock', error); return }
                               await fetchAll()
                             }}
                               className="text-purple-600 text-xs hover:text-purple-800">Release Lock</button>

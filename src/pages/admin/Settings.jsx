@@ -4,6 +4,7 @@ import AdminPage from '../../components/admin/AdminPage'
 import SaveButton from '../../components/admin/SaveButton'
 import { Loading } from '../../components/admin/States'
 import { useSavedFlash } from '../../lib/useSavedFlash'
+import { useToast } from '../../lib/useToast'
 
 const labelClass = "block text-xs tracking-widest uppercase mb-1 text-gray-500"
 
@@ -16,27 +17,45 @@ export default function Settings() {
   })
   const [saved, flashSaved] = useSavedFlash()
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [showToast, toastNode] = useToast()
+  const fail = (message, error) => { console.error(message, error); showToast(message) }
 
-  useEffect(() => { fetchSettings() }, [])
-
-  async function fetchSettings() {
-    const { data } = await supabase.from('settings').select('*')
-    if (data) {
-      const map = {}
-      data.forEach(row => { map[row.key] = row.value })
-      setMessages(prev => ({ ...prev, ...map }))
+  useEffect(() => {
+    async function fetchSettings() {
+      const { data, error } = await supabase.from('settings').select('*')
+      if (error) {
+        setLoadError(true)
+        setLoading(false)
+        fail('Could not load settings.', error)
+        return
+      }
+      if (data) {
+        const map = {}
+        data.forEach(row => { map[row.key] = row.value })
+        setMessages(prev => ({ ...prev, ...map }))
+      }
+      setLoading(false)
     }
-    setLoading(false)
-  }
+    fetchSettings()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function saveAll() {
-    for (const [key, value] of Object.entries(messages)) {
-      await supabase.from('settings').upsert({ key, value }, { onConflict: 'key' })
-    }
+    const { error } = await supabase.from('settings')
+      .upsert(Object.entries(messages).map(([key, value]) => ({ key, value })), { onConflict: 'key' })
+    if (error) { fail('Could not save settings.', error); return }
     flashSaved()
   }
 
   if (loading) return <AdminPage width="2xl" title="Settings" subtitle="Manage confirmation messages and staff alerts" headerGap="10"><Loading /></AdminPage>
+
+  if (loadError) return (
+    <AdminPage width="2xl" title="Settings" subtitle="Manage confirmation messages and staff alerts" headerGap="10">
+      <p className="text-sm text-gray-500">Could not load settings. Reload the page to try again.</p>
+      {toastNode}
+    </AdminPage>
+  )
 
   return (
     <AdminPage width="2xl" title="Settings" subtitle="Manage confirmation messages and staff alerts" headerGap="10"
@@ -91,6 +110,7 @@ export default function Settings() {
           />
         </div>
       </div>
+      {toastNode}
     </AdminPage>
   )
 }

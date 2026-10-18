@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toLayoutRows } from './tableLayoutRows'
+import { toLayoutRows, firstDuplicateName } from './tableLayoutRows'
 
 describe('toLayoutRows', () => {
   it('keeps only the editable layout columns and defaults rotated to false', () => {
@@ -27,5 +27,15 @@ describe('toLayoutRows', () => {
       { id: 'a', table_number: 'T1', capacity: null, x_position: 0, y_position: 0, is_bookable: true, rotated: false },
     ])
     expect(row.capacity).toBeNull()
+  })
+})
+
+describe('firstDuplicateName', () => {
+  it('returns null when every name is unique', () => {
+    expect(firstDuplicateName([{ table_number: 'T1' }, { table_number: 'T2' }])).toBeNull()
+  })
+
+  it('returns the first repeated name', () => {
+    expect(firstDuplicateName([{ table_number: 'T1' }, { table_number: 'O1' }, { table_number: 'T1' }])).toBe('T1')
   })
 })

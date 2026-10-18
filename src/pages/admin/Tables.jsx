@@ -6,7 +6,7 @@ import { getDayType } from '../../lib/dayType'
 import { buildTimeline, formatClock } from '../../lib/tableTimeline'
 import { useUrlState } from '../../lib/useUrlState'
 import { useToast } from '../../lib/useToast'
-import { toLayoutRows } from '../../lib/tableLayoutRows'
+import { toLayoutRows, firstDuplicateName } from '../../lib/tableLayoutRows'
 
 const DATE_DEBOUNCE_MS = 300
 
@@ -297,6 +297,8 @@ export default function Tables() {
   }
 
   async function saveTables() {
+    const duplicate = firstDuplicateName(tables)
+    if (duplicate) { showToast(`Two tables are named "${duplicate}". Rename one before saving.`); return }
     const { error } = await supabase.from('restaurant_tables').upsert(toLayoutRows(tables), { onConflict: 'id' })
     if (error) { fail('Could not save the layout. Nothing was changed.', error); return }
     setSaved(true)
@@ -501,15 +503,8 @@ export default function Tables() {
       await fetchAll()
     }
 
-    // Soft warning only -- table_number has no uniqueness constraint and
-    // duplicates already exist elsewhere in this data, so this isn't a hard
-    // block, just a heads-up to avoid confusing an already-existing name.
     if (tables.some(t => t.table_number === name)) {
-      setConfirmModal({
-        message: `A table named "${name}" already exists. Create another one with the same name anyway?`,
-        onConfirm: () => { insertRow(); setConfirmModal(null) },
-        onCancel: () => setConfirmModal(null)
-      })
+      showToast(`A table named "${name}" already exists. Pick another name.`)
       return
     }
     await insertRow()

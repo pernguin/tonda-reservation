@@ -12,3 +12,14 @@ export function toLayoutRows(tables) {
     rotated: t.rotated || false,
   }))
 }
+
+// restaurant_tables.table_number is unique in the database; returns the first
+// name used by more than one table, or null.
+export function firstDuplicateName(tables) {
+  const seen = new Set()
+  for (const t of tables) {
+    if (seen.has(t.table_number)) return t.table_number
+    seen.add(t.table_number)
+  }
+  return null
+}

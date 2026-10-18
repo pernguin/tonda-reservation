@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { useNavigate, useLocation } from 'react-router-dom'
-import logo from '../assets/Logo_2.png'
+import logo from '../assets/Logo_2.webp'
 
 export default function Navbar() {
   const [isAdmin, setIsAdmin] = useState(false)
@@ -31,7 +31,7 @@ export default function Navbar() {
         fontFamily: isAdminRoute ? undefined : 'var(--font-body)'
       }}>
       <a href="/" className="flex items-center gap-3">
-        <img src={logo} alt="Tonda Pizza Romana" className="h-8 w-auto" />
+        <img src={logo} alt="Tonda Pizza Romana" width={320} height={143} className="h-8 w-auto" />
         <span className="text-sm font-medium tracking-widest uppercase hidden md:block"
           style={{ color: isAdminRoute ? 'white' : 'var(--color-header-text)' }}>
           Pizza Romana

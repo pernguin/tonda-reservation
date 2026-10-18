@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import ManageBooking from './pages/ManageBooking'
 import Feedback from './pages/Feedback'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
@@ -8,17 +9,19 @@ import Reservations from './pages/Reservations'
 import Events from './pages/Events'
 import Offsite from './pages/Offsite'
 import ExperienceDetail from './pages/ExperienceDetail'
-import Dashboard from './pages/admin/Dashboard'
-import Tables from './pages/admin/Tables'
-import Bookings from './pages/admin/Bookings'
-import SlotRules from './pages/admin/SlotRules'
-import Customers from './pages/admin/Customers'
-import AdminFeedback from './pages/admin/Feedback'
-import Login from './pages/admin/Login'
 import RequireAuth from './components/RequireAuth'
 import NewBookingAlert from './components/NewBookingAlert'
-import Settings from './pages/admin/Settings'
-import Experiences from './pages/admin/Experiences'
+import { Loading } from './components/admin/States'
+
+const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
+const Tables = lazy(() => import('./pages/admin/Tables'))
+const Bookings = lazy(() => import('./pages/admin/Bookings'))
+const SlotRules = lazy(() => import('./pages/admin/SlotRules'))
+const Customers = lazy(() => import('./pages/admin/Customers'))
+const AdminFeedback = lazy(() => import('./pages/admin/Feedback'))
+const Login = lazy(() => import('./pages/admin/Login'))
+const Settings = lazy(() => import('./pages/admin/Settings'))
+const Experiences = lazy(() => import('./pages/admin/Experiences'))
 
 function Layout() {
   const location = useLocation()
@@ -29,6 +32,7 @@ function Layout() {
     <>
       {!isStandalone && <Navbar />}
       {location.pathname.startsWith('/admin') && location.pathname !== '/admin/login' && <NewBookingAlert />}
+      <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/reservations" element={<Reservations />} />
@@ -47,6 +51,7 @@ function Layout() {
         <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
         <Route path="/admin/experiences" element={<RequireAuth><Experiences /></RequireAuth>} />
       </Routes>
+      </Suspense>
       {!isStandalone && <Footer />}
     </>
   )

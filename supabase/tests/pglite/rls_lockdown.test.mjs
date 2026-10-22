@@ -11,21 +11,21 @@ export const LOCKED = [
 // Seed one row per locked table (as superuser), then simulate the live state with permissive legacy policies.
 async function seedAndLegacy(db) {
   await db.exec(`
-    insert into public.reservations (status, reservation_date) values ('confirmed', '2030-01-07');
+    insert into public.reservations (status, reservation_date, reservation_time, guest_count) values ('confirmed', '2030-01-07', '19:00', 2);
     insert into public.settings (key, value) values
       ('confirmation_message_event', 'hello'), ('staff_alert_email', 'staff@example.com')
       on conflict (key) do update set value = excluded.value;
     insert into public.events (event_type) values ('seed');
     insert into public.offsite_bookings (event_type) values ('seed');
-    insert into public.experience_registrations (name) values ('seed');
+    insert into public.experience_registrations (name, phone) values ('seed', '60100000000');
     insert into public.operating_hours (day_type) values ('seedday');
     insert into public.slot_rules (day_type) values ('seedday');
     insert into public.blocked_dates (blocked_date) values ('2030-02-01');
     insert into public.blackout_dates (block_date) values ('2030-02-02');
-    insert into public.experiences (name) values ('seed');
+    insert into public.experiences (name, date, time) values ('seed', '2030-02-03', '19:00');
     insert into public.public_holidays (holiday_date, name) values ('2030-03-01', 'Seed') on conflict do nothing;
     insert into public.restaurant_tables (table_number) values ('SEED');
-    insert into public.table_blocks (table_id) values (gen_random_uuid());
+    insert into public.table_blocks (table_id, block_date, source_type) select id, '2030-02-04', 'manual' from public.restaurant_tables where table_number = 'SEED';
     insert into public.table_groups (id) values (gen_random_uuid());
     insert into public.customers (full_name) values ('seed');
     alter table public.reservations enable row level security;
@@ -78,14 +78,14 @@ export default async function ({ db, q, expectError, readMigration }) {
 
   await asRole('anon', async () => {
     assert.equal(await count('reservations'), 0, 'anon cannot select reservations')
-    await expectError(`insert into public.reservations (status) values ('pending')`, [], RLS)
+    await expectError(`insert into public.reservations (status, reservation_date, reservation_time, guest_count) values ('pending', '2030-01-07', '19:00', 2)`, [], RLS)
     assert.equal((await db.query(`update public.reservations set status = 'cancelled'`)).affectedRows, 0)
     assert.equal((await db.query(`delete from public.reservations`)).affectedRows, 0)
 
     await db.query(`insert into public.events (event_type) values ('birthday')`)
     await expectError(`insert into public.events (event_type) values ('x') returning id`, [], RLS)
     await db.query(`insert into public.offsite_bookings (event_type) values ('birthday')`)
-    await db.query(`insert into public.experience_registrations (name) values ('Test')`)
+    await db.query(`insert into public.experience_registrations (name, phone) values ('Test', '60100000000')`)
 
     for (const t of ['events', 'offsite_bookings', 'experience_registrations', 'restaurant_tables', 'table_blocks', 'table_groups', 'customers']) {
       assert.equal(await count(t), 0, `anon cannot select ${t}`)
@@ -98,7 +98,8 @@ export default async function ({ db, q, expectError, readMigration }) {
       assert.ok((await count(t)) >= 1, `anon can read ${t}`)
     }
     await expectError(`insert into public.slot_rules (day_type) values ('x')`, [], RLS)
-    await expectError(`insert into public.restaurant_tables (table_number) values ('X')`, [], RLS)
+    // live also revokes anon's write grants here, so either guard may answer first
+    await expectError(`insert into public.restaurant_tables (table_number) values ('X')`, [], /row-level security|permission denied/)
   })
   const [untouched] = await q(`select count(*)::int as n from public.reservations where status = 'confirmed' and reservation_date = '2030-01-07'`)
   assert.ok(untouched.n >= 1, 'seed reservation untouched by anon')
@@ -111,7 +112,7 @@ export default async function ({ db, q, expectError, readMigration }) {
   // T7: authenticated and definer paths.
   await asRole('authenticated', async () => {
     assert.ok((await count('reservations')) >= 1)
-    await db.query(`insert into public.reservations (status) values ('pending')`)
+    await db.query(`insert into public.reservations (status, reservation_date, reservation_time, guest_count) values ('pending', '2030-01-07', '19:00', 2)`)
     assert.ok((await db.query(`update public.reservations set status = 'cancelled' where status = 'pending'`)).affectedRows >= 1)
     assert.ok((await db.query(`delete from public.reservations where status = 'cancelled'`)).affectedRows >= 1)
     await db.query(`insert into public.restaurant_tables (table_number) values ('AUTH')`)

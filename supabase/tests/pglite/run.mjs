@@ -1,4 +1,4 @@
-// Offline SQL test runner: PGlite (Postgres in WASM) + stub schema + the real migrations.
+// Offline SQL test runner: PGlite (Postgres in WASM) + the live schema snapshot + any newer migrations.
 // Usage: npm run test:sql
 import { PGlite } from '@electric-sql/pglite'
 import { readFile, readdir } from 'node:fs/promises'
@@ -10,49 +10,33 @@ import { seed } from './fixtures.mjs'
 const here = dirname(fileURLToPath(import.meta.url))
 const migrationsDir = join(here, '..', '..', 'migrations')
 
-// filename -> reason. Migrations that cannot run in PGlite.
-const SKIP = {}
-
-// { file, find, replace, reason }: applied to the SQL text before exec.
-const REWRITE = [
-  {
-    file: '20260914170100_server_side_assignment.sql',
-    find: 'create extension if not exists pg_cron;',
-    replace: '',
-    reason: 'pg_cron is not available in PGlite; the `cron` schema stub provides what the migration calls',
-  },
-]
-
 const readMigration = (filename) => readFile(join(migrationsDir, filename), 'utf8')
 
 const db = new PGlite()
-await db.exec(await readFile(join(here, 'stub-schema.sql'), 'utf8'))
+await db.exec(await readFile(join(here, 'platform-shim.sql'), 'utf8'))
 
-const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort()
+// live-schema.sql (from `npm run test:sql:dump`) already holds every migration up to its `migrations-through`
+// version; only newer migrations (the ones about to be pushed) are applied on top.
+const live = await readFile(join(here, 'live-schema.sql'), 'utf8')
+const through = live.match(/^-- migrations-through: (\d+)$/m)?.[1]
+if (!through) {
+  console.error('live-schema.sql has no migrations-through line; rerun npm run test:sql:dump')
+  process.exit(1)
+}
+await db.exec(live)
+
+const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql') && f.split('_')[0] > through).sort()
 let applied = 0
-let skipped = 0
 for (const file of files) {
-  if (SKIP[file]) {
-    skipped++
-    continue
-  }
-  let sql = await readMigration(file)
-  for (const r of REWRITE.filter((x) => x.file === file)) {
-    if (!sql.includes(r.find)) {
-      console.error(`REWRITE target not found in ${file}: ${r.find}`)
-      process.exit(1)
-    }
-    sql = sql.split(r.find).join(r.replace)
-  }
   try {
-    await db.exec(sql)
+    await db.exec(await readMigration(file))
     applied++
   } catch (e) {
     console.error(`MIGRATION FAILED ${file}: ${e.message}`)
     process.exit(1)
   }
 }
-console.log(`applied ${applied}, skipped ${skipped}`)
+console.log(`live schema through ${through}, applied ${applied} newer migration(s)`)
 
 const q = async (sql, params) => (await db.query(sql, params)).rows
 

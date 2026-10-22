@@ -15,7 +15,8 @@ export default async function ({ db, q }) {
   assert.equal(col.is_nullable, 'YES')
 
   await db.exec(`insert into vault.decrypted_secrets values ('tonda_service_role_key', 'k');`)
-  const calls = () => q(`select url, headers, body from net.http_calls where url not like '%notify-staff%' order by id`)
+  // only the approval trigger's calls; the live insert/completed triggers post too
+  const calls = () => q(`select url, headers, body from net.http_calls where body->>'event' = 'approved' order by id`)
   const ins = (status) =>
     q(
       `insert into public.reservations (reservation_date, reservation_time, guest_count, status)

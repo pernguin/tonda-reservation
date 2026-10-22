@@ -8,6 +8,7 @@ import { firstRow, prefillName } from '../lib/prefill'
 import { getDayType } from '../lib/dayType'
 import { isSlotBookable } from '../lib/slotCutoff'
 import { pickAvailableGroups, findSlotRow, MAX_ONLINE_PARTY } from '../lib/availabilitySlots'
+import { bookingSuccessCopy } from '../lib/bookingSuccessCopy'
 
 // operating_hours / slot_rules change rarely: cached per day_type in a Map for the page's lifetime.
 // A failed load is dropped from the cache so the next call retries.
@@ -185,7 +186,8 @@ export default function Reservations() {
   const [submitted, setSubmitted] = useState(false)
   const [bookingId, setBookingId] = useState(null)
   const [confirmedBooking, setConfirmedBooking] = useState(null)
-  const [confirmationMessage, setConfirmationMessage] = useState('Thank you for your reservation request. Our team will contact you shortly to confirm your booking.')
+  const [bookingStatus, setBookingStatus] = useState(null)
+  const [settingsMessage, setSettingsMessage] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [existingCustomer, setExistingCustomer] = useState(undefined)
@@ -411,9 +413,10 @@ export default function Reservations() {
         return
       }
       setBookingId(booking.id)
+      setBookingStatus(booking.status)
       setConfirmedBooking({ time: form.reservation_time, durationMinutes })
       const { data: msgData } = await supabase.from('settings').select('value').eq('key', 'confirmation_message_reservation').maybeSingle()
-      if (msgData?.value) setConfirmationMessage(msgData.value)
+      setSettingsMessage(msgData?.value ?? null)
       setSubmitted(true)
     } catch (err) {
       setError('Something went wrong. Please try again.')
@@ -425,6 +428,7 @@ export default function Reservations() {
   }
   if (submitted && bookingId) {
     const manageUrl = `${window.location.origin}/booking/${bookingId}`
+    const { heading, message } = bookingSuccessCopy(bookingStatus, settingsMessage)
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-8"
         style={{ backgroundColor: CREAM, fontFamily: 'var(--font-body)' }}>
@@ -435,13 +439,13 @@ export default function Reservations() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-2xl mb-3" style={{ color: BRAND, fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>Request Received</h2>
+          <h2 className="text-2xl mb-3" style={{ color: BRAND, fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-weight-heading)', fontStyle: 'var(--font-heading-style)' }}>{heading}</h2>
           {confirmedBooking && (
             <p className="text-sm font-medium text-[var(--color-text-2)] mb-2">
               {formatTimeRange(confirmedBooking.time, confirmedBooking.durationMinutes)}
             </p>
           )}
-          <p className="text-[var(--color-text-2)] text-sm leading-relaxed mb-6">{confirmationMessage}</p>
+          <p className="text-[var(--color-text-2)] text-sm leading-relaxed mb-6">{message}</p>
           <div className="border border-[var(--color-border)] rounded-xl p-4 mb-8 text-left"
             style={{ backgroundColor: 'var(--color-surface)' }}>
             <p className="text-xs tracking-widest uppercase text-[var(--color-text-muted)] mb-2">Manage your booking</p>

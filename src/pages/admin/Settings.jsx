@@ -63,7 +63,7 @@ export default function Settings() {
       <div className="space-y-10">
         <div>
           <p className="text-lg font-medium text-gray-900 mb-1">Reservation Confirmation</p>
-          <p className="text-xs text-gray-400 mb-3">Shown to customers after submitting a reservation request. Available placeholders: {'{name}'}, {'{date}'}, {'{time}'}, {'{guests}'}</p>
+          <p className="text-xs text-gray-400 mb-3">Shown to customers whose booking is confirmed straight away. Bookings that need approval show a fixed 'we'll confirm by email' message instead.</p>
           <label className={labelClass}>Message</label>
           <textarea
             value={messages.confirmation_message_reservation}

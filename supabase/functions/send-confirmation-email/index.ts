@@ -1,5 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { buildConfirmationEmail } from "../_shared/emails.ts";
+import { confirmationPlan } from "../_shared/confirmationKind.ts";
 import { createRoundClient } from "../_shared/roundClient.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
@@ -13,14 +14,15 @@ Deno.serve(async (req) => {
   let claimed = false;
   let delivered = false;
   let reservationId: string | null = null;
+  let claimColumn: "confirmation_sent_at" | "approval_sent_at" = "confirmation_sent_at";
 
   const releaseClaim = async () => {
     try {
       const { error } = await supabase
-        .from("reservations").update({ confirmation_sent_at: null }).eq("id", reservationId);
-      if (error) console.error("failed to release confirmation claim", reservationId, error.message);
+        .from("reservations").update({ [claimColumn]: null }).eq("id", reservationId);
+      if (error) console.error("failed to release " + claimColumn, reservationId, error.message);
     } catch (e) {
-      console.error("failed to release confirmation claim", reservationId, e);
+      console.error("failed to release " + claimColumn, reservationId, e);
     }
   };
 
@@ -51,9 +53,11 @@ Deno.serve(async (req) => {
     if (!reservation) {
       return new Response(JSON.stringify({ error: "Reservation not found" }), { status: 404 });
     }
-    if (reservation.status !== "pending" && reservation.status !== "confirmed") {
-      return new Response(JSON.stringify({ skipped: "status " + reservation.status }), { status: 200 });
+    const plan = confirmationPlan(payload.event, reservation.status);
+    if (!plan.send) {
+      return new Response(JSON.stringify({ skipped: plan.reason }), { status: 200 });
     }
+    claimColumn = plan.claimColumn;
 
     // Look up customer in Round's Supabase (shared customer DB)
     const { data: customer, error: customerError } = await roundSupabase
@@ -72,9 +76,9 @@ Deno.serve(async (req) => {
     // Claim before sending so a second call cannot send a duplicate.
     const { data: claimedRows, error: claimError } = await supabase
       .from("reservations")
-      .update({ confirmation_sent_at: new Date().toISOString() })
+      .update({ [claimColumn]: new Date().toISOString() })
       .eq("id", id)
-      .is("confirmation_sent_at", null)
+      .is(claimColumn, null)
       .select("id");
 
     if (claimError) {

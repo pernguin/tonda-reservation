@@ -20,9 +20,9 @@ Deno.serve(async (req) => {
     try {
       const { error } = await supabase
         .from("reservations").update({ [claimColumn]: null }).eq("id", reservationId);
-      if (error) console.error("failed to release confirmation claim", reservationId, error.message);
+      if (error) console.error("failed to release " + claimColumn, reservationId, error.message);
     } catch (e) {
-      console.error("failed to release confirmation claim", reservationId, e);
+      console.error("failed to release " + claimColumn, reservationId, e);
     }
   };
 

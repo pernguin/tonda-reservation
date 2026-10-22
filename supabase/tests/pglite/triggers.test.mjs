@@ -8,14 +8,8 @@ export default async function ({ db, q }) {
     assert.ok(p.proconfig.includes('search_path=public, vault, pg_temp'), `${fn} search_path: ${p.proconfig}`)
   }
 
-  // the live triggers are in no migration: create them locally (rolled back with the test)
-  await db.exec(`
-    create trigger on_reservation_insert after insert on public.reservations
-      for each row execute function public.notify_reservation_insert();
-    create trigger on_reservation_completed after update on public.reservations
-      for each row execute function public.notify_reservation_completed();
-    insert into vault.decrypted_secrets values ('tonda_service_role_key', 'k');
-  `)
+  // on_reservation_insert / on_reservation_completed come from the live schema (they are in no migration)
+  await db.exec(`insert into vault.decrypted_secrets values ('tonda_service_role_key', 'k');`)
 
   // (2) happy path
   const [r] = await q(

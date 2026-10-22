@@ -416,7 +416,7 @@ export default function Reservations() {
       setBookingStatus(booking.status)
       setConfirmedBooking({ time: form.reservation_time, durationMinutes })
       const { data: msgData } = await supabase.from('settings').select('value').eq('key', 'confirmation_message_reservation').maybeSingle()
-      setSettingsMessage(msgData?.value || null)
+      setSettingsMessage(msgData?.value ?? null)
       setSubmitted(true)
     } catch (err) {
       setError('Something went wrong. Please try again.')

@@ -8,6 +8,6 @@ export function bookingSuccessCopy(status, settingsMessage) {
   if (status === 'pending') return { heading: PENDING_HEADING, message: PENDING_MESSAGE }
   return {
     heading: CONFIRMED_HEADING,
-    message: settingsMessage?.trim() ? settingsMessage : CONFIRMED_FALLBACK
+    message: settingsMessage?.trim() ? settingsMessage : CONFIRMED_FALLBACK,
   }
 }

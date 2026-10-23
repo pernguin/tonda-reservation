@@ -14,6 +14,7 @@
 | 10 | [Tonda RLS lockdown (MERGE LAST)](10-tonda-lockdown.md) | done (PR #14, merged 2026-10-17) |
 | 11 | [Staff-approved bookings get the Confirmed email](11-approval-confirmed-email.md) | done (PR #19, migrated + deployed + smoke-tested 2026-10-22) |
 | 12 | [Booking success page matches the booking's status](12-status-aware-booking-success.md) | done (PR #21, smoke-tested live 2026-10-22) |
+| 13 | [SQL tests run on the live schema](13-pglite-live-schema.md) | done (PR #23, merged 2026-10-22) |
 
 Plan and merge order for 03–10: [2026-10-17-audit-plan.md](2026-10-17-audit-plan.md).
 
